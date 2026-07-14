@@ -341,7 +341,8 @@ protected:
   // <---- Publishing functions
 
   // ----> Utility functions
-  bool isDepthDisabled() { return mDepthDisabledByRate || mDepthDisabledByService || (mDepthMode == sl::DEPTH_MODE::NONE);}
+  bool isDepthDisabled() { return mDepthDisabledByService || (mDepthMode == sl::DEPTH_MODE::NONE);}
+  bool shouldRunDepthPipeline() { return !mDepthDisabledByRate && !isDepthDisabled(); }
   bool isDepthRequired();
   void updateDepthRateDisabling();
   bool updatePosTrackingSubscribers(bool force = false);
@@ -570,6 +571,7 @@ private:
   sl::VoxelMeasureParameters mVoxelParams;
 #endif
   std::atomic<bool> mDepthDisabledByRate = false; // frequently updated depending on mDepthRate
+  double mDepthTimerCarry = 0.0;
   std::atomic<bool> mDepthDisabledByService = false; // toggled by enable_depth service
   std::mutex mDepthTimerMutex;
   int mDepthStabilization = 0;

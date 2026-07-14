@@ -608,14 +608,12 @@ void ZedCamera::getDepthParams()
   }
 
   if (mDepthMode == sl::DEPTH_MODE::NONE) {
-    //mDepthDisabled = true;
     mDepthStabilization = 0;
     RCLCPP_INFO_STREAM(
       get_logger(),
       " * Depth mode: " << sl::toString(mDepthMode).c_str()
                         << " - DEPTH DISABLED");
   } else {
-    //mDepthDisabled = false;
     RCLCPP_INFO_STREAM(
       get_logger(),
       " * Depth mode: " << sl::toString(mDepthMode).c_str()
@@ -1085,12 +1083,11 @@ void ZedCamera::updateDepthRateDisabling()
   if (mDepthRate == mCamGrabFrameRate) { mDepthDisabledByRate = false; return; }
   if (mDepthRate <= 0.0) { mDepthDisabledByRate = true; return; }
   
-  static double carry = 0.0;
   double targetPeriod(1.0 / mDepthRate);
 
   double toc = mDepthRateTimer.toc();
-  if (toc + carry >= targetPeriod) {
-    carry = std::min(toc + carry - targetPeriod, targetPeriod);
+  if (toc + mDepthTimerCarry >= targetPeriod) {
+    mDepthTimerCarry = std::min(toc + mDepthTimerCarry - targetPeriod, targetPeriod);
     mDepthRateTimer.tic();
     mDepthDisabledByRate = false;
     return;
@@ -1102,8 +1099,8 @@ bool ZedCamera::isDepthRequired()
 {
   // DEBUG_STREAM_COMM( "isDepthRequired called");
 
-  if (isDepthDisabled()) {
-    DEBUG_STREAM_COMM("Depth not required: depth disabled");
+  if (!shouldRunDepthPipeline()) {
+    DEBUG_STREAM_COMM("Depth not required this frame");
     return false;
   }
 
@@ -1722,6 +1719,9 @@ void ZedCamera::retrieveVideoDepth(bool gpu)
       " * Video Latency: " << static_cast<double>(now - mSdkGrabTS) * 1e-9 << " sec");
   }
 
+  // Don't retrieve depth if we don't need it this frame (fine to check here, we are
+  // still in the grab thread thus we haven't updated mDepthDisabledByRate yet)
+  if (!shouldRunDepthPipeline()) { return; }
   DEBUG_STREAM_VD(" *** Retrieving Depth Data ***");
   retrieved_depth |= retrieveDepthMap(gpu);
   retrieved_depth |= retrieveConfidence(gpu);
@@ -1959,7 +1959,6 @@ void ZedCamera::publishVideoDepth(rclcpp::Time & out_pub_ts)
   DEBUG_VD("=== Publish Video and Depth topics === ");
   sl_tools::StopWatch vdElabTimer(get_clock());
 
-  //checkRgbDepthSync(); // This doesn't work when we are altering depth rate
 
   vdElabTimer.tic();
   rclcpp::Time timeStamp;
@@ -2007,7 +2006,7 @@ void ZedCamera::checkRgbDepthSync()
     {
       RCLCPP_WARN_STREAM(
         get_logger(),
-        " !!!!! DEPTH/RGB ASYNC !!!!! - Delta: "
+        " !!!!! DEPTH/RGB ASYNC!!!! - Delta: "
           << 1e-9 * static_cast<int64_t>(ts_depth.data_ns - ts_rgb.data_ns) 
           << " sec");
       RCLCPP_WARN(
@@ -3559,19 +3558,19 @@ bool ZedCamera::handleDepthParams(
       RCLCPP_WARN_STREAM(get_logger(), result.reason);
       return true;
     }
-     double val = param.as_double();
+    double val = param.as_double();
     if (val < -1.0 || val > mCamGrabFrameRate) {
       result.successful = false;
       result.reason = name + " must be >= -1 and <= `grab_frame_rate` (0 or -1 = no limit)";
       RCLCPP_WARN_STREAM(get_logger(), result.reason);
       return true;
-    if (val <= 0.0) {
-      val = static_cast<double>(mCamGrabFrameRate);
-    }
+      if (val <= 0.0) {
+        val = static_cast<double>(mCamGrabFrameRate);
+      }
     }
     mDepthRate = val;
     // Also need to update the window for the diagnostics (so diagnostics refresh per second)
-    mDepthPeriodMean_sec->setNewSize(mDepthRate);
+    mDepthPeriodMean_sec->setNewSize(static_cast<size_t>(mDepthRate));
     DEBUG_STREAM_DYN_PARAMS("Parameter '" << name << "' correctly set to " << val);
     return true;
   } else if (name == "depth.depth_confidence" || name == "depth.depth_texture_conf") {
