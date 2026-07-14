@@ -3564,10 +3564,12 @@ bool ZedCamera::handleDepthParams(
       result.reason = name + " must be >= -1 and <= `grab_frame_rate` (0 or -1 = no limit)";
       RCLCPP_WARN_STREAM(get_logger(), result.reason);
       return true;
-      if (val <= 0.0) {
-        val = static_cast<double>(mCamGrabFrameRate);
-      }
     }
+
+    if (val <= 0.0) {
+      val = static_cast<double>(mCamGrabFrameRate);
+    }
+
     mDepthRate = val;
     // Also need to update the window for the diagnostics (so diagnostics refresh per second)
     mDepthPeriodMean_sec->setNewSize(static_cast<size_t>(mDepthRate));
