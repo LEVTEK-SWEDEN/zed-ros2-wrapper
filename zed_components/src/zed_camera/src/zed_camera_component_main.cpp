@@ -65,39 +65,39 @@ namespace stereolabs
 
 ZedCamera::ZedCamera(const rclcpp::NodeOptions & options)
 : Node("zed_node", options),
-  mDepthDisabled(false),                   // 530
-  mStreamingServerRequired(false),         // 647
-  mQos(QOS_QUEUE_SIZE),                    // 693
-  mThreadStop(false),                      // 954
-  mNodeDeinitialized(false),               // 955
-  mStreamingServerRunning(false),          // 1020
-  mUptimer(get_clock()),                   // 1046
-  mDiagUpdater(this),                      // 1075
-  mImuTfFreqTimer(get_clock()),            // 1077
-  mGrabFreqTimer(get_clock()),             // 1078
-  mImuFreqTimer(get_clock()),              // 1079
-  mBaroFreqTimer(get_clock()),             // 1080
-  mMagFreqTimer(get_clock()),              // 1081
-  mOdomFreqTimer(get_clock()),             // 1082
-  mPoseFreqTimer(get_clock()),             // 1083
-  mPcPubFreqTimer(get_clock()),            // 1084
-  mVdPubFreqTimer(get_clock()),            // 1085
-  mSensPubFreqTimer(get_clock()),          // 1086
-  mOdFreqTimer(get_clock()),               // 1087
-  mBtFreqTimer(get_clock()),               // 1088
-  mPcFreqTimer(get_clock()),               // 1089
-  mGnssFixFreqTimer(get_clock()),          // 1090
-  mFrameTimestamp(TIMEZERO_ROS),           // 1097
-  mGnssTimestamp(TIMEZERO_ROS),            // 1098
-  mLastTs_imu(TIMEZERO_ROS),               // 1099
-  mLastTs_baro(TIMEZERO_ROS),              // 1100
-  mLastTs_mag(TIMEZERO_ROS),               // 1101
-  mLastTs_odom(TIMEZERO_ROS),              // 1102
-  mLastTs_pose(TIMEZERO_ROS),              // 1103
-  mLastTs_pc(TIMEZERO_ROS),                // 1104
-  mPrevTs_pc(TIMEZERO_ROS),                // 1105
-  mLastClock(TIMEZERO_ROS),                // 1107
-  mSetSvoFrameCheckTimer(get_clock())      // 1136
+  mStreamingServerRequired(false),
+  mQos(QOS_QUEUE_SIZE),
+  mThreadStop(false),
+  mNodeDeinitialized(false),
+  mStreamingServerRunning(false),
+  mUptimer(get_clock()),
+  mDiagUpdater(this),
+  mImuTfFreqTimer(get_clock()),
+  mGrabFreqTimer(get_clock()),
+  mImuFreqTimer(get_clock()),
+  mBaroFreqTimer(get_clock()),
+  mMagFreqTimer(get_clock()),
+  mOdomFreqTimer(get_clock()),
+  mPoseFreqTimer(get_clock()),
+  mPcPubFreqTimer(get_clock()),
+  mVdPubFreqTimer(get_clock()),
+  mSensPubFreqTimer(get_clock()),
+  mOdFreqTimer(get_clock()),
+  mBtFreqTimer(get_clock()),
+  mPcFreqTimer(get_clock()),
+  mGnssFixFreqTimer(get_clock()),
+  mDepthRateTimer(get_clock()),
+  mFrameTimestamp(TIMEZERO_ROS), 
+  mGnssTimestamp(TIMEZERO_ROS),  
+  mLastTs_imu(TIMEZERO_ROS),
+  mLastTs_baro(TIMEZERO_ROS),
+  mLastTs_mag(TIMEZERO_ROS),
+  mLastTs_odom(TIMEZERO_ROS),
+  mLastTs_pose(TIMEZERO_ROS),
+  mLastTs_pc(TIMEZERO_ROS),
+  mPrevTs_pc(TIMEZERO_ROS),
+  mLastClock(TIMEZERO_ROS),
+  mSetSvoFrameCheckTimer(get_clock())
 {
   try {
     mUsingIPC = options.use_intra_process_comms();
@@ -357,9 +357,9 @@ void ZedCamera::initServices()
 
 #if (ZED_SDK_MAJOR_VERSION * 10 + ZED_SDK_MINOR_VERSION) >= 52
   // With ZED SDK v5.2 we can use Positional Tracking `GEN_3` even if depth is disabled
-  if (!mDepthDisabled || mPosTrkMode == sl::POSITIONAL_TRACKING_MODE::GEN_3) {
+  if (!isDepthDisabled() || mPosTrkMode == sl::POSITIONAL_TRACKING_MODE::GEN_3) {
 #else
-  if (!mDepthDisabled) {
+  if (!isDepthDisabled()) {
 #endif
 
     if (mPosTrackingEnabled) {
@@ -401,7 +401,7 @@ void ZedCamera::initServices()
     }
   }
 
-  if (!mDepthDisabled) {
+  if (!isDepthDisabled()) {
     // Enable Depth Processing
     srv_name = srv_prefix + mSrvEnableDepthName;
     mEnableDepthSrv = create_service<std_srvs::srv::SetBool>(
@@ -603,9 +603,9 @@ void ZedCamera::initParameters()
 #if (ZED_SDK_MAJOR_VERSION * 10 + ZED_SDK_MINOR_VERSION) >= 52
   // With ZED SDK v5.2 we can use Positional Tracking `GEN_3` even if depth is
   // disabled
-  if (!mDepthDisabled || mPosTrkMode == sl::POSITIONAL_TRACKING_MODE::GEN_3) {
+  if (!isDepthDisabled() || mPosTrkMode == sl::POSITIONAL_TRACKING_MODE::GEN_3) {
 #else
-  if (!mDepthDisabled) {
+  if (!isDepthDisabled()) {
 #endif
     // Positional Tracking parameters
     getPosTrackingParams();
@@ -625,7 +625,7 @@ void ZedCamera::initParameters()
     mPublishPath = false;
   }
 
-  if (!mDepthDisabled) {
+  if (!isDepthDisabled()) {
     // Region of Interest parameters
     getRoiParams();
   } else {
@@ -638,7 +638,7 @@ void ZedCamera::initParameters()
     getSensorsParams();
   }
 
-  if (!mDepthDisabled && mPosTrackingEnabled) {
+  if (!isDepthDisabled() && mPosTrackingEnabled) {
     getMappingParams();
   } else {
     mMappingEnabled = false;
@@ -646,9 +646,9 @@ void ZedCamera::initParameters()
 
   // AI PARAMETERS
 #if ((ZED_SDK_MAJOR_VERSION * 10 + ZED_SDK_MINOR_VERSION) < 52)
-  if (!mDepthDisabled && mPosTrackingEnabled) {
+  if (!isDepthDisabled() && mPosTrackingEnabled) {
 #else
-  if (!mDepthDisabled) {
+  if (!isDepthDisabled()) {
 #endif
     if (sl_tools::isObjDetAvailable(mCamUserModel)) {
       getOdParams();
@@ -2274,7 +2274,7 @@ void ZedCamera::setTFCoordFrameNames()
   RCLCPP_INFO_STREAM(
     get_logger(),
     " * Right Optical\t\t-> " << mRightCamOptFrameId);
-  if (!mDepthDisabled) {
+  if (!isDepthDisabled()) {
     RCLCPP_INFO_STREAM(get_logger(), " * Depth\t\t\t-> " << mDepthFrameId);
     RCLCPP_INFO_STREAM(
       get_logger(),
@@ -2406,9 +2406,9 @@ void ZedCamera::initPublishers()
 #if (ZED_SDK_MAJOR_VERSION * 10 + ZED_SDK_MINOR_VERSION) >= 52
   // With ZED SDK v5.2 we can use Positional Tracking `GEN_3` even if depth is
   // disabled
-  if (!mDepthDisabled || mPosTrkMode == sl::POSITIONAL_TRACKING_MODE::GEN_3) {
+  if (!isDepthDisabled() || mPosTrkMode == sl::POSITIONAL_TRACKING_MODE::GEN_3) {
 #else
-  if (!mDepthDisabled) {
+  if (!isDepthDisabled()) {
 #endif
     // ----> Pos Tracking
     if (mPublishOdomPose) {
@@ -2645,7 +2645,7 @@ void ZedCamera::initSubscribers()
   */
   int sub_count = 0;
 
-  if (!mDepthDisabled && mPosTrackingEnabled) {
+  if (!isDepthDisabled() && mPosTrackingEnabled) {
     mClickedPtSub = create_subscription<geometry_msgs::msg::PointStamped>(
       mClickedPtTopic, mQos,
       std::bind(&ZedCamera::callback_clickedPoint, this, _1), mSubOpt);
@@ -3311,7 +3311,7 @@ bool ZedCamera::startCamera()
 
 
   // ----> Set Region of Interest
-  if (!mDepthDisabled) {
+  if (!isDepthDisabled()) {
     if (mAutoRoiEnabled) {
       RCLCPP_INFO(get_logger(), "=== Enabling Automatic ROI ===");
 
@@ -3727,8 +3727,10 @@ bool ZedCamera::startCamera()
   mGrabPeriodMean_sec = std::make_unique<sl_tools::WinAvg>(mCamGrabFrameRate);
   mVideoDepthPeriodMean_sec =
     std::make_unique<sl_tools::WinAvg>(mCamGrabFrameRate);
-  mVideoDepthElabMean_sec =
+  mDepthPeriodMean_sec =
     std::make_unique<sl_tools::WinAvg>(mCamGrabFrameRate);
+  mVideoDepthElabMean_sec =
+    std::make_unique<sl_tools::WinAvg>(mDepthRate);
   mPcPeriodMean_sec = std::make_unique<sl_tools::WinAvg>(mCamGrabFrameRate);
   mPcProcMean_sec = std::make_unique<sl_tools::WinAvg>(mCamGrabFrameRate);
   mObjDetPeriodMean_sec = std::make_unique<sl_tools::WinAvg>(mCamGrabFrameRate);
@@ -3873,7 +3875,7 @@ void ZedCamera::initThreads()
   // <---- Start Video/Depth thread
 
   // ----> Start Pointcloud thread
-  if (!mDepthDisabled) {
+  if (!isDepthDisabled()) {
     mPcDataReady = false;
     mPcThread = std::thread(&ZedCamera::threadFunc_pointcloudElab, this);
   }
@@ -3973,9 +3975,9 @@ bool ZedCamera::startPosTrackingLocked()
 #if (ZED_SDK_MAJOR_VERSION * 10 + ZED_SDK_MINOR_VERSION) >= 52
   // With ZED SDK v5.2 we can use Positional Tracking `GEN_3` even if depth is
   // disabled
-  if (mDepthDisabled && mPosTrkMode != sl::POSITIONAL_TRACKING_MODE::GEN_3) {
+  if (isDepthDisabled() && mPosTrkMode != sl::POSITIONAL_TRACKING_MODE::GEN_3) {
 #else
-  if (mDepthDisabled) {
+  if (isDepthDisabled()) {
 #endif
     RCLCPP_WARN(
       get_logger(),
@@ -4208,7 +4210,7 @@ bool ZedCamera::saveAreaMemoryFile(const std::string & filePath)
 bool ZedCamera::start3dMapping()
 {
   DEBUG_MAP("start3dMapping");
-  if (mDepthDisabled) {
+  if (isDepthDisabled()) {
     RCLCPP_WARN(
       get_logger(),
       "Cannot start 3D Mapping if Depth processing is disabled");
@@ -4992,6 +4994,10 @@ void ZedCamera::threadFunc_zedGrab()
 
       sl_tools::StopWatch grabElabTimer(get_clock());
 
+      // Update the boolean mDepthDisabledByRate based on the depth.depth_freq parameter.
+      // This will toggle whether or not we grab a frame from the camera with depth data or not.
+      updateDepthRateDisabling();
+
       // ----> Apply depth settings
       DEBUG_STREAM_GRAB("Grab thread: applying depth settings");
       applyDepthSettings();
@@ -5028,11 +5034,10 @@ void ZedCamera::threadFunc_zedGrab()
           get_logger(), steady_clock, 5000.0,
           " * Waiting for the first valid GNSS fix...");
       }
-      // ----> Check for Positional Tracking requirement
+      // <---- Check for Positional Tracking requirement
 
-      if (!mDepthDisabled) {
+      if (!isDepthDisabled()) {
         // ----> Check for Spatial Mapping requirement
-
         DEBUG_STREAM_GRAB("Grab thread: checking Spatial Mapping requirement");
         {
           std::lock_guard<std::mutex> lock(mMappingMutex);
@@ -5043,7 +5048,6 @@ void ZedCamera::threadFunc_zedGrab()
             stop3dMapping();
           }
         }
-
         // <---- Check for Spatial Mapping requirement
 
         // ----> Check for Object Detection requirement
@@ -5057,7 +5061,7 @@ void ZedCamera::threadFunc_zedGrab()
             }
           }
         }
-        // ----> Check for Object Detection requirement
+        // <---- Check for Object Detection requirement
 
         // ----> Check for Body Tracking requirement
         DEBUG_STREAM_GRAB("Grab thread: checking Body Tracking requirement");
@@ -5070,7 +5074,7 @@ void ZedCamera::threadFunc_zedGrab()
             }
           }
         }
-        // ----> Check for Object Detection requirement
+        // <---- Check for Body Tracking requirement
       }
 
       // ----> Grab freq calculation
@@ -5121,7 +5125,9 @@ void ZedCamera::threadFunc_zedGrab()
 
         } else {
           DEBUG_GRAB("Grab thread: reading...");
-          mGrabStatus = mZed->read();  // Image and sensor data reading with no depth processing
+          mRunParams.enable_depth = false;
+          mGrabStatus = mZed->grab(mRunParams);
+          mRunParams.enable_depth = true;
         }
       }
       // <---- Safe grab
@@ -5326,7 +5332,7 @@ void ZedCamera::threadFunc_zedGrab()
       processVideoDepth();
       // <---- Retrieve Image/Depth data if someone has subscribed to
 
-      if (!mDepthDisabled) {
+      if (shouldRunDepthPipeline()) {
         // ----> Retrieve the point cloud if someone has subscribed to
         DEBUG_STREAM_GRAB("Grab thread: retrieving Point Cloud data");
         processPointCloud();
@@ -5335,9 +5341,9 @@ void ZedCamera::threadFunc_zedGrab()
 
 #if (ZED_SDK_MAJOR_VERSION * 10 + ZED_SDK_MINOR_VERSION) >= 52
       // With ZED SDK v5.2 we can use `GEN_3` even if depth is disabled
-      if (!mDepthDisabled || mPosTrkMode == sl::POSITIONAL_TRACKING_MODE::GEN_3) {
+      if (shouldRunDepthPipeline() || mPosTrkMode == sl::POSITIONAL_TRACKING_MODE::GEN_3) {
 #else
-      if (!mDepthDisabled) {
+      if (shouldRunDepthPipeline()) {
 #endif
         // ----> Localization processing
         DEBUG_STREAM_GRAB("Grab thread: Localization processing");
@@ -5382,7 +5388,7 @@ void ZedCamera::threadFunc_zedGrab()
         // <---- Localization processing
       }
 
-      if (!mDepthDisabled) {
+      if (shouldRunDepthPipeline()) {
         DEBUG_STREAM_GRAB("Grab thread: Object Detection processing");
         {
           std::lock_guard<std::mutex> lock(mObjDetMutex);
@@ -5812,19 +5818,11 @@ void ZedCamera::publishTFs(rclcpp::Time t)
     return;
   }
 
-#if (ZED_SDK_MAJOR_VERSION * 10 + ZED_SDK_MINOR_VERSION) >= 52
-  // With ZED SDK v5.2 we can use Positional Tracking `GEN_3` even if depth is
-  // disabled
-  if (!mDepthDisabled || mPosTrkMode == sl::POSITIONAL_TRACKING_MODE::GEN_3) {
-#else
-  if (!mDepthDisabled) {
-#endif
-    if (mPublishTF) {
-      publishOdomTF(t); // publish the base Frame in odometry frame
+  if (mPublishTF) {
+    publishOdomTF(t); // publish the base Frame in odometry frame
 
-      if (mPublishMapTF) {
-        publishPoseTF(t); // publish the odometry Frame in map frame
-      }
+    if (mPublishMapTF) {
+      publishPoseTF(t); // publish the odometry Frame in map frame
     }
   }
 
@@ -7473,11 +7471,10 @@ bool ZedCamera::isPosTrackingRequired()
 #if (ZED_SDK_MAJOR_VERSION * 10 + ZED_SDK_MINOR_VERSION) >= 52
   // With ZED SDK v5.2 we can use Positional Tracking `GEN_3` even if depth is
   // disabled
-  if (mDepthDisabled && mPosTrkMode != sl::POSITIONAL_TRACKING_MODE::GEN_3) {
+  if (!shouldRunDepthPipeline() && mPosTrkMode != sl::POSITIONAL_TRACKING_MODE::GEN_3) {
 #else
-  if (mDepthDisabled) {
+  if (!shouldRunDepthPipeline()) {
 #endif
-    DEBUG_ONCE_PT("POS. TRACKING not required: Depth disabled (unless GEN3 mode).");
     return false;
   }
 
@@ -8006,20 +8003,20 @@ void ZedCamera::callback_enableDepth(
 
   if (req->data) {
     RCLCPP_INFO(get_logger(), "Depth processing enabled");
-    mDepthDisabled = false;
+    mDepthDisabledByService = false;
     res->message = "Depth processing enabled";
   } else {
     RCLCPP_INFO(get_logger(), "Depth processing disabled");
-    mDepthDisabled = true;
+    mDepthDisabledByService = true;
     res->message = "Depth processing disabled";
   }
 
 #if (ZED_SDK_MAJOR_VERSION * 10 + ZED_SDK_MINOR_VERSION) >= 52
   // With ZED SDK v5.2 we can use Positional Tracking `GEN_3` even if depth is
   // disabled
-  if (mDepthDisabled && mPosTrkMode != sl::POSITIONAL_TRACKING_MODE::GEN_3) {
+  if (isDepthDisabled() && mPosTrkMode != sl::POSITIONAL_TRACKING_MODE::GEN_3) {
 #else
-  if (mDepthDisabled) {
+  if (isDepthDisabled()) {
 #endif
     RCLCPP_WARN(
       get_logger(),
@@ -8031,13 +8028,13 @@ void ZedCamera::callback_enableDepth(
     }
   }
 
-  if (mDepthDisabled && mObjDetEnabled) {
+  if (isDepthDisabled() && mObjDetEnabled) {
     RCLCPP_WARN(
       get_logger(),
       "Depth disabled: Object Detection processing will be disabled.");
   }
 
-  if (mDepthDisabled && mBodyTrkEnabled) {
+  if (isDepthDisabled() && mBodyTrkEnabled) {
     RCLCPP_WARN(
       get_logger(),
       "Depth disabled: Body Tracking processing will be disabled.");
@@ -8695,10 +8692,10 @@ void ZedCamera::callback_updateDiagnostic(
       stat.addf(
         "Data Capture -capped-", "%.1f Hz (%.1f%%)", freq, freq_perc);
     } else {
-      stat.addf("Camera Grab rate", "%d Hz", mCamGrabFrameRate);
+      stat.addf("Desired Camera Grab rate", "%d Hz", mCamGrabFrameRate);
       freq_perc = 100. * freq / mCamGrabFrameRate;
       stat.addf(
-        "Data Capture", "Mean Frequency: %.1f Hz (%.1f%%)", freq,
+        "Actual Camera Grab rate", "Mean Frequency: %.1f Hz (%.1f%%)", freq,
         freq_perc);
     }
 
@@ -8752,26 +8749,31 @@ void ZedCamera::callback_updateDiagnostic(
       stat.add("Input mode", "Live Camera");
     }
 
+    bool should_publish_depth_diagnostics = 
+      !mDepthDisabledByService
+      && mDepthMode != sl::DEPTH_MODE::NONE
+      && mDepthRate != 0.0;
+
     if (mVdPublishing) {
       if (mSvoMode && !mSvoRealtime) {
         freq = 1. / mGrabPeriodMean_sec->getAvg();
         freq_perc = 100. * freq / mVdPubRate;
         stat.addf(
-          "Video/Depth", "Mean Frequency: %.1f Hz (%.1f%%)", freq,
+          "Depth", "Mean Frequency: %.1f Hz (%.1f%%)", freq,
           freq_perc);
-      } else {
-        freq = 1. / mVideoDepthPeriodMean_sec->getAvg();
-        freq_perc = 100. * freq / mVdPubRate;
-        frame_grab_period = 1. / mVdPubRate;
+      } else if (should_publish_depth_diagnostics) {
+        freq = 1. / mDepthPeriodMean_sec->getAvg();
+        freq_perc = 100. * freq / mDepthRate;
+        frame_grab_period = 1. / mDepthRate;
         stat.addf(
-          "Video/Depth", "Mean Frequency: %.1f Hz (%.1f%%)", freq,
+          "Depth", "Mean Frequency: %.1f Hz (%.1f%%)", freq,
           freq_perc);
       }
       stat.addf(
         "Video/Depth", "Processing Time: %.6f sec (Max. %.3f sec)",
         mVideoDepthElabMean_sec->getAvg(), frame_grab_period);
     } else {
-      stat.add("Video/Depth", "Topic not subscribed");
+      stat.add("Depth", "Topic not subscribed");
     }
 
     if (mSvoMode) {
@@ -8790,7 +8792,7 @@ void ZedCamera::callback_updateDiagnostic(
       }
     }
 
-    if (!mDepthDisabled) {
+    if (should_publish_depth_diagnostics) {
       stat.add("Depth status", "ACTIVE");
       stat.add("Depth mode", sl::toString(mDepthMode).c_str());
 
@@ -8863,9 +8865,9 @@ void ZedCamera::callback_updateDiagnostic(
     }
 
 #if (ZED_SDK_MAJOR_VERSION * 10 + ZED_SDK_MINOR_VERSION) >= 52
-    if (!mDepthDisabled || mPosTrkMode == sl::POSITIONAL_TRACKING_MODE::GEN_3) { // With ZED SDK v5.2 we can use `GEN_3` even if depth is disabled
+    if (!isDepthDisabled() || mPosTrkMode == sl::POSITIONAL_TRACKING_MODE::GEN_3) { // With ZED SDK v5.2 we can use `GEN_3` even if depth is disabled
 #else
-    if (!mDepthDisabled) {
+    if (!isDepthDisabled()) {
 #endif
       stat.addf(
         "Positional Tracking mode", "%s",
@@ -9652,7 +9654,7 @@ void ZedCamera::callback_setRoi(
 
   RCLCPP_INFO(get_logger(), "** Set ROI service called **");
 
-  if (mDepthDisabled) {
+  if (isDepthDisabled()) {
     std::string err_msg =
       "Error while setting ZED SDK region of interest: depth processing is "
       "disabled!";
@@ -9783,7 +9785,7 @@ void ZedCamera::callback_resetRoi(
 {
   RCLCPP_INFO(get_logger(), "** Reset ROI service called **");
 
-  if (mDepthDisabled) {
+  if (isDepthDisabled()) {
     std::string err_msg =
       "Error while resetting ZED SDK region of interest: depth processing "
       "is "
