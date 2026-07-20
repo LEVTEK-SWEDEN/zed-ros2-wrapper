@@ -77,6 +77,8 @@ protected:
   void setTFCoordFrameNames();
   void initPublishers();
   void initVideoDepthPublishers();
+  bool openZedCamera();
+  void publishCamOpened();
 
   void initSubscribers();
 
@@ -943,6 +945,7 @@ private:
   svoStatusPub mPubSvoStatus;
   healthStatusPub mPubHealthStatus;
   heartbeatStatusPub mPubHeartbeatStatus;
+  openStatusPub mPubOpenStatus;
   disparityPub mPubDisparity;
   posePub mPubPose;
   poseStatusPub mPubPoseStatus;
