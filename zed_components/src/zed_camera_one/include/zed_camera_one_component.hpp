@@ -86,10 +86,14 @@ protected:
   void processCameraInformation();
   void setupCameraInfoMessages();
 
+  void pauseGrab();
+  void restartGrab();
+
   void startTempPubTimer();
   void startHeartbeatTimer();
   bool startStreamingServer();
   void stopStreamingServer();
+  void startGrabStatusUpdateTimer();
   bool startSvoRecording(std::string & errMsg);
   void stopSvoRecording();
   // <---- Initialization functions
@@ -107,7 +111,7 @@ protected:
   void applyDigitalGain();
   void applyExposureCompensationAndDenoising();
 
-  bool areImageTopicsSubscribed();
+  size_t updateImgSubCount();
   bool areSensorsTopicsSubscribed();
   void retrieveImages(bool gpu);
   void publishImages();
@@ -217,6 +221,7 @@ protected:
     diagnostic_updater::DiagnosticStatusWrapper & stat);
   void callback_pubTemp();
   void callback_pubHeartbeat();
+  void callback_updateGrabStatus();
 
   void callback_enableStreaming(
     const std::shared_ptr<rmw_request_id_t> request_header,
@@ -259,8 +264,9 @@ private:
   std::atomic<bool> _nodeDeinitialized = false;
   std::atomic<bool> _threadStop;
   rclcpp::TimerBase::SharedPtr _initTimer;
-  rclcpp::TimerBase::SharedPtr _tempPubTimer;    // Timer to retrieve and publish camera temperature
+  rclcpp::TimerBase::SharedPtr _tempPubTimer;
   rclcpp::TimerBase::SharedPtr _heartbeatTimer;
+  rclcpp::TimerBase::SharedPtr _grabStatusUpdateTimer;
   // <---- Threads and Timers
 
   // ----> Thread Sync
@@ -543,7 +549,7 @@ private:
   std::unique_ptr<sl_tools::WinAvg> _pubImu_sec;
   bool _imuPublishing = false;
   bool _videoPublishing = false;
-  bool _imageSubscribed = false;
+  std::atomic<bool> _haveImgSubs = false;
 
   sl_tools::StopWatch _grabFreqTimer;
   sl_tools::StopWatch _imuFreqTimer;

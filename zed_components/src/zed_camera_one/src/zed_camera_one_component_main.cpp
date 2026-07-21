@@ -1272,18 +1272,11 @@ void ZedCameraOne::initializeDiagnosticStatistics()
 
 void ZedCameraOne::initThreadsAndTimers()
 {
-  // Start Heartbeat timer
   startHeartbeatTimer();
-
-  // ----> Start CMOS Temperatures thread
   startTempPubTimer();
-  // <---- Start CMOS Temperatures thread
-
-  // Start sensor thread
   _sensThread = std::thread(&ZedCameraOne::threadFunc_pubSensorsData, this);
-
-  // Start grab thread
   _grabThread = std::thread(&ZedCameraOne::threadFunc_zedGrab, this);
+  startGrabStatusUpdateTimer();
 }
 
 void ZedCameraOne::callback_updateDiagnostic(
@@ -2003,7 +1996,7 @@ void ZedCameraOne::threadFunc_zedGrab()
 
       if (!_svoPause) {
         grabElabTimer.tic();
-        if (!performCameraGrab()) {break;}
+        if (!performCameraGrab()) break;
         updateFrameTimestamp();
         if (_svoMode) {
           _svoFrameId = _zed->getSVOPosition();
@@ -2030,6 +2023,13 @@ void ZedCameraOne::threadFunc_zedGrab()
       DEBUG_STREAM_COMM("threadFunc_zedGrab: Generic exception.");
       continue;
     }
+
+    // If no image subs, sleep for a frame length to emulate grab (otherwise
+    // while loop runs much more frequently
+    if (!_haveImgSubs) {
+      int grab_period_ns = static_cast<int>(1e9 / _camGrabFrameRate);
+      rclcpp::sleep_for(static_cast<std::chrono::nanoseconds>(grab_period_ns));      
+   }
   }
 
   _diagUpdater.broadcast(diagnostic_msgs::msg::DiagnosticStatus::STALE, "Grab thread stopped");
@@ -2321,9 +2321,9 @@ void ZedCameraOne::callback_pubHeartbeat()
     return;
   }
 
-  if (_threadStop) {
-    return;
-  }
+  //   if (_threadStop) {
+  //   return;
+  // }
 
   // ----> Count the subscribers
   size_t sub_count = 0;
@@ -2744,6 +2744,47 @@ void ZedCameraOne::startHeartbeatTimer()
   _heartbeatTimer = create_wall_timer(
     std::chrono::duration_cast<std::chrono::milliseconds>(pubPeriod_msec),
     std::bind(&ZedCameraOne::callback_pubHeartbeat, this));
+}
+
+void ZedCameraOne::callback_updateGrabStatus()
+{
+  size_t sub_count = updateImgSubCount();
+  _haveImgSubs = (sub_count != 0);
+  
+  if (!_haveImgSubs) 
+    pauseGrab();
+  else
+    restartGrab();
+}
+
+
+void ZedCameraOne::pauseGrab()
+{
+  if (!_grabThread.joinable()) return; 
+  RCLCPP_INFO_STREAM(get_logger(), "No subs found, idling camera.");
+  _threadStop = true;
+  try {
+      _grabThread.join();
+  } catch (std::system_error &e) {
+    DEBUG_STREAM_COMM("Grab thread joining exception: " << e.what());
+    RCLCPP_INFO_STREAM(get_logger(), "Grab thread joining exception: " << e.what());
+  }
+}
+
+void ZedCameraOne::restartGrab()
+{
+  if (!_threadStop) return;
+  _grabThread = std::thread(&ZedCameraOne::threadFunc_zedGrab, this);
+  RCLCPP_INFO_STREAM(get_logger(), "Restarted the grab thread.");
+  _threadStop = false;
+}
+
+void ZedCameraOne::startGrabStatusUpdateTimer()
+{
+    std::chrono::milliseconds pubPeriod_msec(HEARTBEAT_INTERVAL_MS);
+    _grabStatusUpdateTimer = create_wall_timer(
+    std::chrono::duration_cast<std::chrono::milliseconds>(500ms),
+    std::bind(&ZedCameraOne::callback_updateGrabStatus, this));
 }
 
 }  // namespace stereolabs

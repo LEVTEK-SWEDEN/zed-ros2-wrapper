@@ -457,7 +457,7 @@ void ZedCameraOne::setupCameraInfoMessages()
   fillCamInfo(_camInfoRawMsg, _camOptFrameId, true);
 }
 
-bool ZedCameraOne::areImageTopicsSubscribed()
+size_t ZedCameraOne::updateImgSubCount()
 {
   _colorSubCount = 0;
   _colorRawSubCount = 0;
@@ -489,35 +489,39 @@ bool ZedCameraOne::areImageTopicsSubscribed()
   } catch (...) {
     rcutils_reset_error();
     DEBUG_STREAM_VD("publishImages: Exception while counting subscribers");
-    return false;
+    return 0;
   }
 
-  return (_colorSubCount + _colorRawSubCount +
-         _graySubCount + _grayRawSubCount
-  ) > 0;
+  return _colorSubCount + _colorRawSubCount + _graySubCount + _grayRawSubCount;
 }
 
 void ZedCameraOne::handleImageRetrievalAndPublishing()
 {
-  _imageSubscribed = areImageTopicsSubscribed();
-  if (_imageSubscribed) {
-    DEBUG_STREAM_VD("Retrieving video data");
+  _videoPublishing = false;
+  if (!_haveImgSubs) return; // Used to publish old camera info for some reason
 
-    bool gpu = false;
-#ifdef FOUND_ISAAC_ROS_NITROS
-    if (!_nitrosDisabled) {
-      gpu = true;
-    }
-#endif
-    retrieveImages(gpu);
-    publishImages();
-    _videoPublishing = true;
-  } else {
-    _videoPublishing = false;
-
-    // Publish camera infos even if no video/depth subscribers are present
-    publishCameraInfos();
+  // If frame is same as last, don't publish
+  if (_sdkGrabTS.getNanoseconds() == _lastTs_grab.getNanoseconds()) {
+    DEBUG_VD("handleImageRetrievalAndPublishing: ignoring not updated data");
+    DEBUG_STREAM_VD(
+      "Latest Ts: " << _lastTs_grab.getNanoseconds()
+                    << " - New Ts: "
+                    << _sdkGrabTS.getNanoseconds());
+    return;
   }
+
+DEBUG_STREAM_VD("Retrieving video data");
+
+  bool gpu = false;
+#ifdef FOUND_ISAAC_ROS_NITROS
+  if (!_nitrosDisabled) {
+    gpu = true;
+  }
+#endif
+
+  retrieveImages(gpu);
+  publishImages();
+  _videoPublishing = true;
 }
 
 void ZedCameraOne::retrieveImages(bool gpu)
@@ -589,15 +593,6 @@ void ZedCameraOne::publishImages()
   DEBUG_VD("=== Publish Image topics === ");
   sl_tools::StopWatch vdElabTimer(get_clock());
   vdElabTimer.tic();
-
-  if (_sdkGrabTS.getNanoseconds() == _lastTs_grab.getNanoseconds()) {
-    DEBUG_VD("publishImages: ignoring not update data");
-    DEBUG_STREAM_VD(
-      "Latest Ts: " << _lastTs_grab.getNanoseconds()
-                    << " - New Ts: "
-                    << _sdkGrabTS.getNanoseconds());
-    return;
-  }
 
   if (_sdkGrabTS.data_ns != 0) {
     double period_sec =
@@ -1301,4 +1296,4 @@ void ZedCameraOne::publishCameraInfos()
   publishCameraInfo(_pubGrayRawImgInfoTrans, _camInfoRawMsg, pub_ts);
 }
 
-}
+} // namespace stereolabs
