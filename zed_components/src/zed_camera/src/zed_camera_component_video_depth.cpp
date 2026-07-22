@@ -2381,7 +2381,7 @@ void ZedCamera::publishStereoRawImages(const rclcpp::Time & t)
 
 void ZedCamera::publishDepthImage(const rclcpp::Time & t)
 {
-  if (mSdkDepthGrabTS == mSdkLastDepthPublishTS || mDepthSubCount == 0) return;
+  if (mSdkDepthGrabTS == mSdkLastDepthPublishTS || mDepthSubCount <= 0) return;
   mSdkLastDepthPublishTS = mSdkDepthGrabTS;
   publishDepthMapWithInfo(mMatDepth, t);
 }
