@@ -976,6 +976,7 @@ private:
   // <---- Publisher variables
   sl::Timestamp mSdkGrabTS = 0;
   sl::Timestamp mSdkDepthGrabTS = 0;
+  sl::Timestamp mSdkLastDepthPublishTS = 0;
   size_t mRgbSubCount = 0;
   size_t mRgbRawSubCount = 0;
   size_t mRgbGraySubCount = 0;

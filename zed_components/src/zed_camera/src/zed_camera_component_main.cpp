@@ -576,30 +576,16 @@ std::string ZedCamera::getParam(
 
 void ZedCamera::initParameters()
 {
-  // DEBUG parameters
   getDebugParams();
-
-  // TOPIC parameters
   getTopicEnableParams();
-
-  // SIMULATION parameters
   getSimParams();
-
-  // SVO parameters
   getSvoParams();
-
-  // GENERAL parameters
   getGeneralParams();
-
-  // VIDEO parameters
   if (!mSvoMode && !mSimMode) {
     getVideoParams();
   }
-
-  // DEPTH parameters
   getDepthParams();
 
-  // POS. TRACKING and GNSS FUSION parameters
 #if (ZED_SDK_MAJOR_VERSION * 10 + ZED_SDK_MINOR_VERSION) >= 52
   // With ZED SDK v5.2 we can use Positional Tracking `GEN_3` even if depth is
   // disabled
@@ -607,11 +593,9 @@ void ZedCamera::initParameters()
 #else
   if (!isDepthDisabled()) {
 #endif
-    // Positional Tracking parameters
     getPosTrackingParams();
 
     if (mPosTrackingEnabled) {
-      // GNSS Fusion parameters
       getGnssFusionParams();
     } else {
       mGnssFusionEnabled = false;
@@ -626,13 +610,11 @@ void ZedCamera::initParameters()
   }
 
   if (!isDepthDisabled()) {
-    // Region of Interest parameters
     getRoiParams();
   } else {
     mRoyPolyParam.clear();
     mAutoRoiEnabled = false;
   }
-
   // SENSORS parameters
   if (!sl_tools::isZED(mCamUserModel)) {
     getSensorsParams();
@@ -3852,36 +3834,22 @@ void ZedCamera::closeCamera()
 
 void ZedCamera::initThreads()
 {
-  // Start Heartbeat timer
   startHeartbeatTimer();
 
-  // ----> Start CMOS Temperatures thread
-  if (!mSimMode && !sl_tools::isZED(mCamRealModel) &&
-    !sl_tools::isZEDM(mCamRealModel))
-  {
+  if (!mSimMode && !sl_tools::isZED(mCamRealModel) && !sl_tools::isZEDM(mCamRealModel))
     startTempPubTimer();
-  }
-  // <---- Start CMOS Temperatures thread
 
-  // ----> Start Sensors thread if not sync
-  if (!mSensCameraSync && !sl_tools::isZED(mCamRealModel)) {
+  if (!mSensCameraSync && !sl_tools::isZED(mCamRealModel))
     mSensThread = std::thread(&ZedCamera::threadFunc_pubSensorsData, this);
-  }
-  // <---- Start Sensors thread if not sync
 
-  // ----> Start Video/Depth thread
   mVdDataReady = false;
   mVdThread = std::thread(&ZedCamera::threadFunc_videoDepthElab, this);
-  // <---- Start Video/Depth thread
 
-  // ----> Start Pointcloud thread
   if (!isDepthDisabled()) {
     mPcDataReady = false;
     mPcThread = std::thread(&ZedCamera::threadFunc_pointcloudElab, this);
   }
-  // <---- Start Pointcloud thread
 
-  // Start grab thread
   mGrabThread = std::thread(&ZedCamera::threadFunc_zedGrab, this);
 }
 

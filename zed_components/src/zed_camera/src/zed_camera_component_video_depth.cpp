@@ -1721,7 +1721,7 @@ void ZedCamera::retrieveVideoDepth(bool gpu)
 
   // Don't retrieve depth if we don't need it this frame (fine to check here, we are
   // still in the grab thread thus we haven't updated mDepthDisabledByRate yet)
-  if (!shouldRunDepthPipeline()) { return; }
+  if (!shouldRunDepthPipeline()) return;
   DEBUG_STREAM_VD(" *** Retrieving Depth Data ***");
   retrieved_depth |= retrieveDepthMap(gpu);
   retrieved_depth |= retrieveConfidence(gpu);
@@ -1738,8 +1738,6 @@ void ZedCamera::retrieveVideoDepth(bool gpu)
 
   DEBUG_VD(" *** Retrieving Video/Depth Data DONE ***");
 }
-
-// Helper functions for retrieveVideoDepth()
 
 bool ZedCamera::retrieveLeftImage(bool gpu)
 {
@@ -2383,12 +2381,9 @@ void ZedCamera::publishStereoRawImages(const rclcpp::Time & t)
 
 void ZedCamera::publishDepthImage(const rclcpp::Time & t)
 {
-  if (mDepthSubCount > 0) {
-    publishDepthMapWithInfo(mMatDepth, t);
-  } else {
-    publishCameraInfo(mPubDepthCamInfo, mLeftCamInfoMsg, t);
-    publishCameraInfo(mPubDepthCamInfoTrans, mLeftCamInfoMsg, t);
-  }
+  if (mSdkDepthGrabTS == mSdkLastDepthPublishTS || mDepthSubCount <= 0) return;
+  mSdkLastDepthPublishTS = mSdkDepthGrabTS;
+  publishDepthMapWithInfo(mMatDepth, t);
 }
 
 void ZedCamera::publishConfidenceMap(const rclcpp::Time & t)
@@ -3104,8 +3099,6 @@ void ZedCamera::handleVideoDepthPublishing()
     wait_usec = static_cast<int>(vd_period_usec - elapsed_usec);
     rclcpp::sleep_for(std::chrono::microseconds(wait_usec));
     DEBUG_STREAM_VD(" * [handleVideoDepthPublishing] wait_usec " << wait_usec);
-  } else {
-    rclcpp::sleep_for(std::chrono::microseconds(wait_usec));
   }
   DEBUG_STREAM_VD(" * [handleVideoDepthPublishing] sleeped for " << wait_usec << " µsec");
 
