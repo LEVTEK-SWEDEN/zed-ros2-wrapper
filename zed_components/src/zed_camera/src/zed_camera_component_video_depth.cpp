@@ -1975,15 +1975,24 @@ void ZedCamera::publishVideoDepth(rclcpp::Time & out_pub_ts)
   publishRightRawGrayImages(timeStamp);
   publishStereoImages(timeStamp);
   publishStereoRawImages(timeStamp);
-  publishDepthImage(timeStamp);
-  publishConfidenceMap(timeStamp);
-  publishDisparityImage(timeStamp);
-  publishDepthInfo(timeStamp);
 
+
+  if (mLastTs_depthGrab != mSdkLastDepthPublishTS) {
+    mSdkLastDepthPublishTS = mLastTs_depthGrab;
+    publishDepthImage(timeStamp);
+    publishConfidenceMap(timeStamp);
+    publishDisparityImage(timeStamp);
+    publishDepthInfo(timeStamp);
+    mDepthPublishPeriodMean_sec->addValue(mDepthPublishFreqTimer.toc());
+    mDepthPublishFreqTimer.tic();
+ }
 
   mVideoDepthElabMean_sec->addValue(vdElabTimer.toc());
 
   out_pub_ts = timeStamp;
+
+  mPublishPeriodMean_sec->addValue(mPublishFreqTimer.toc());
+  mPublishFreqTimer.tic();
 
   DEBUG_VD("=== Video and Depth topics published === ");
 }
@@ -2381,9 +2390,8 @@ void ZedCamera::publishStereoRawImages(const rclcpp::Time & t)
 
 void ZedCamera::publishDepthImage(const rclcpp::Time & t)
 {
-  if (mSdkDepthGrabTS == mSdkLastDepthPublishTS || mDepthSubCount <= 0) return;
-  mSdkLastDepthPublishTS = mSdkDepthGrabTS;
-  publishDepthMapWithInfo(mMatDepth, t);
+  if (mDepthSubCount > 0)
+    publishDepthMapWithInfo(mMatDepth, t);
 }
 
 void ZedCamera::publishConfidenceMap(const rclcpp::Time & t)
