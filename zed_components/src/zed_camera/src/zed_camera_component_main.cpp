@@ -87,6 +87,8 @@ ZedCamera::ZedCamera(const rclcpp::NodeOptions & options)
   mPcFreqTimer(get_clock()),
   mGnssFixFreqTimer(get_clock()),
   mDepthRateTimer(get_clock()),
+  mPublishFreqTimer(get_clock()),
+  mDepthPublishFreqTimer(get_clock()),
   mFrameTimestamp(TIMEZERO_ROS), 
   mGnssTimestamp(TIMEZERO_ROS),  
   mLastTs_imu(TIMEZERO_ROS),
@@ -3744,6 +3746,8 @@ bool ZedCamera::startCamera()
   mPubPoseTF_sec = std::make_unique<sl_tools::WinAvg>(mSensPubRate);
   mPubImuTF_sec = std::make_unique<sl_tools::WinAvg>(mSensPubRate);
   mGnssFix_sec = std::make_unique<sl_tools::WinAvg>(10);
+  mPublishPeriodMean_sec = std::make_unique<sl_tools::WinAvg>(mVdPubRate);
+  mDepthPublishPeriodMean_sec = std::make_unique<sl_tools::WinAvg>(mDepthRate);
   // <---- Initialize Diagnostic statistics
 
   if (mGnssFusionEnabled) {
@@ -8686,7 +8690,7 @@ void ZedCamera::callback_updateDiagnostic(
     double frame_proc_sec = mElabPeriodMean_sec->getAvg();
     double frame_grab_period = 1. / mCamGrabFrameRate;
     stat.addf(
-      "Data Capture", "Tot. Processing Time: %.6f sec (Max. %.3f sec)",
+      "Grab + retrieve time", "%.6f sec (Max. %.3f sec)",
       frame_proc_sec, frame_grab_period);
 
     if (frame_proc_sec > frame_grab_period) {
@@ -8746,16 +8750,20 @@ void ZedCamera::callback_updateDiagnostic(
           "Depth", "Mean Frequency: %.1f Hz (%.1f%%)", freq,
           freq_perc);
       } else if (should_publish_depth_diagnostics) {
-        freq = 1. / mDepthPeriodMean_sec->getAvg();
+        freq = 1. / mDepthPublishPeriodMean_sec->getAvg();
         freq_perc = 100. * freq / mDepthRate;
         frame_grab_period = 1. / mDepthRate;
         stat.addf(
-          "Depth", "Mean Frequency: %.1f Hz (%.1f%%)", freq,
+          "Depth publish rate", "%.1f Hz (%.1f%%)", freq,
           freq_perc);
       }
       stat.addf(
-        "Video/Depth", "Processing Time: %.6f sec (Max. %.3f sec)",
-        mVideoDepthElabMean_sec->getAvg(), frame_grab_period);
+        "Publish time (average)", "%.6f sec (Max. %.3f sec)",
+        mVideoDepthElabMean_sec->getAvg(), 1.0 / mVdPubRate);
+
+      freq = 1.0 / mPublishPeriodMean_sec->getAvg();
+      freq_perc = 100.0 * freq / mVdPubRate;
+      stat.addf("Publishing rate", "%.1f Hz (%.1f%%)", freq, freq_perc);
     } else {
       stat.add("Depth", "Topic not subscribed");
     }

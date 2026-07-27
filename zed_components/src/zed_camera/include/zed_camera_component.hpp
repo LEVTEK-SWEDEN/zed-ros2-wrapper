@@ -1135,11 +1135,11 @@ private:
   float mTempImu = NOT_VALID_TEMP;
   float mTempLeft = NOT_VALID_TEMP;
   float mTempRight = NOT_VALID_TEMP;
-  std::unique_ptr<sl_tools::WinAvg> mElabPeriodMean_sec;
-  std::unique_ptr<sl_tools::WinAvg> mGrabPeriodMean_sec;
-  std::unique_ptr<sl_tools::WinAvg> mVideoDepthPeriodMean_sec;
-  std::unique_ptr<sl_tools::WinAvg> mDepthPeriodMean_sec;
-  std::unique_ptr<sl_tools::WinAvg> mVideoDepthElabMean_sec;
+  std::unique_ptr<sl_tools::WinAvg> mElabPeriodMean_sec; // Grab + retrieve time
+  std::unique_ptr<sl_tools::WinAvg> mGrabPeriodMean_sec; // Time between grabs
+  std::unique_ptr<sl_tools::WinAvg> mVideoDepthPeriodMean_sec; // Time between image timestamps 
+  std::unique_ptr<sl_tools::WinAvg> mDepthPeriodMean_sec; // Time between depth image timestamps
+  std::unique_ptr<sl_tools::WinAvg> mVideoDepthElabMean_sec; // Publishing time
   std::unique_ptr<sl_tools::WinAvg> mPcPeriodMean_sec;
   std::unique_ptr<sl_tools::WinAvg> mPcProcMean_sec;
   std::unique_ptr<sl_tools::WinAvg> mImuPeriodMean_sec;
@@ -1154,6 +1154,8 @@ private:
   std::unique_ptr<sl_tools::WinAvg> mPubPoseTF_sec;
   std::unique_ptr<sl_tools::WinAvg> mPubImuTF_sec;
   std::unique_ptr<sl_tools::WinAvg> mGnssFix_sec;
+  std::unique_ptr<sl_tools::WinAvg> mPublishPeriodMean_sec; // Time between publishes
+  std::unique_ptr<sl_tools::WinAvg> mDepthPublishPeriodMean_sec; // Time between depth publishes
   bool mImuPublishing = false;
   bool mMagPublishing = false;
   bool mBaroPublishing = false;
@@ -1177,6 +1179,8 @@ private:
   sl_tools::StopWatch mPcFreqTimer;
   sl_tools::StopWatch mGnssFixFreqTimer;
   sl_tools::StopWatch mDepthRateTimer;
+  sl_tools::StopWatch mPublishFreqTimer;
+  sl_tools::StopWatch mDepthPublishFreqTimer;
 
   int mSysOverloadCount = 0;
   // <---- Diagnostic
