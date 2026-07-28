@@ -119,19 +119,7 @@ ZedCameraOne::~ZedCameraOne()
 
 void ZedCameraOne::deInitNode()
 {
-  // EMILIS: temporary testing
-    using std::chrono::high_resolution_clock;
-    using std::chrono::duration_cast;
-    using std::chrono::duration;
-    using std::chrono::milliseconds;
-    auto t1 = high_resolution_clock::now();
-
-  if (_nodeDeinitialized) {
-    auto t2 = high_resolution_clock::now();
-    RCLCPP_INFO_STREAM(get_logger(), "timer shutdown stack:"
-      << duration_cast<milliseconds>(t2 - t1).count() << "ms");    
-    return;
-  }
+  if (_nodeDeinitialized) return;
   _nodeDeinitialized = true;
 
   DEBUG_STREAM_SENS("Stopping temperatures timer");
@@ -169,10 +157,6 @@ void ZedCameraOne::deInitNode()
   // ----> Close the ZED camera
   closeCamera();
   // <---- Close the ZED camera
-
-  auto t2 = high_resolution_clock::now();
-  RCLCPP_INFO_STREAM(get_logger(), "timer shutdown stack:"
-    << duration_cast<milliseconds>(t2 - t1).count() << "ms");
 }
 
 void ZedCameraOne::closeCamera()
@@ -882,29 +866,19 @@ void ZedCameraOne::publishCamOpened()
 
 bool ZedCameraOne::startCamera()
 {
-  // EMILIS: temporary for testing
-  using std::chrono::high_resolution_clock;
-  using std::chrono::duration_cast;
-  using std::chrono::duration;
-  using std::chrono::milliseconds;
-
   RCLCPP_INFO(get_logger(), "=== STARTING CAMERA ===");
 
   createZedObject();
-
   logSdkVersion();
   setupTf2();
   configureZedInput();
-  
   setZedInitParams();
   
-  auto t1 = high_resolution_clock::now();
   if (!openZedCamera()) {
     return false;
   }
-  auto t2 = high_resolution_clock::now();
-  RCLCPP_INFO_STREAM(get_logger(), "timer openZedCamera:"
-    << duration_cast<milliseconds>(t2 - t1).count() << "ms");
+
+  _uptimer.tic();
   
   publishCamOpened();
 

@@ -77,9 +77,7 @@ protected:
   void setTFCoordFrameNames();
   void initPublishers();
   void initVideoDepthPublishers();
-  bool openZedCamera();
   void publishCamOpened();
-
   void initSubscribers();
 
   void fillCamInfo(

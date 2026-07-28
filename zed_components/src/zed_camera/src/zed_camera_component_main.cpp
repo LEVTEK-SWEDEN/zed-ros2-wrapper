@@ -233,19 +233,7 @@ void ZedCamera::initNode()
 
 void ZedCamera::deInitNode()
 {
-  // EMILIS: temporary testing
-    using std::chrono::high_resolution_clock;
-    using std::chrono::duration_cast;
-    using std::chrono::duration;
-    using std::chrono::milliseconds;
-    auto t1 = high_resolution_clock::now();
-
-  if (mNodeDeinitialized) {
-    auto t2 = high_resolution_clock::now();
-    RCLCPP_INFO_STREAM(get_logger(), "timer shutdown stack:"
-      << duration_cast<milliseconds>(t2 - t1).count() << "ms");    
-    return;
-  }
+  if (mNodeDeinitialized) { return; }
   mNodeDeinitialized = true;
 
   DEBUG_COMM("De-initializing ZED Component");
@@ -347,10 +335,6 @@ void ZedCamera::deInitNode()
   DEBUG_COMM("All threads stopped. Closing camera...");
   closeCamera();
   DEBUG_COMM("... camera closed");
-
-  auto t2 = high_resolution_clock::now();
-  RCLCPP_INFO_STREAM(get_logger(), "timer shutdown stack:"
-    << duration_cast<milliseconds>(t2 - t1).count() << "ms");     
 }
 
 ZedCamera::~ZedCamera()
@@ -2744,144 +2728,6 @@ void ZedCamera::publishCamOpened()
   mPubOpenStatus->publish(std::move(msg));
 }
 
-bool ZedCamera::openZedCamera()
-{
-  sl_tools::StopWatch connectTimer(get_clock());
-
-  mThreadStop = false;
-  mGrabStatus = sl::ERROR_CODE::LAST;
-
-  // Tell sl_tools whether timestamps in this process come from a replay
-  // source (SVO / simulation) so slTime2Ros knows not to apply the live
-  // monotonic-clock offset to file-recorded values. Process-wide.
-  sl_tools::setSdkReplayMode(mSvoMode || mSimMode);
-
-#if (ZED_SDK_MAJOR_VERSION * 10 + ZED_SDK_MINOR_VERSION) >= 53
-  if (mUseSdkMonotonicClock) {
-    sl::Camera::setTimestampClock(sl::TIMESTAMP_CLOCK::MONOTONIC_CLOCK);
-    if (sl::Camera::getTimestampClock() != sl::TIMESTAMP_CLOCK::MONOTONIC_CLOCK) {
-      RCLCPP_WARN(
-        get_logger(),
-        "Another node in this process already set the SDK timestamp clock; "
-        "this node's 'general.sdk_use_monotonic_clock' request was ignored.");
-      mUseSdkMonotonicClock = false;
-    } else {
-      RCLCPP_INFO(
-        get_logger(),
-        "SDK timestamp clock set to MONOTONIC_CLOCK (process-wide).");
-    }
-  }
-#endif
- 
-  while (1) {
-    //rclcpp::sleep_for(500ms);
-
-    mConnStatus = mZed->open(mInitParams);
-
-    if (mConnStatus == sl::ERROR_CODE::SUCCESS) {
-      DEBUG_STREAM_COMM("Opening successfull");
-      mUptimer.tic(); // Sets the beginning of the camera connection time
-#if (ZED_SDK_MAJOR_VERSION * 10 + ZED_SDK_MINOR_VERSION) >= 53
-      if (mUseSdkMonotonicClock && !mSvoMode && !mSimMode) {
-        const sl::Timestamp sdk_now = sl::getCurrentTimeStamp();
-        const rclcpp::Time ros_now = get_clock()->now();
-        const int64_t offset_ns =
-          static_cast<int64_t>(ros_now.nanoseconds()) -
-          static_cast<int64_t>(sdk_now.getNanoseconds());
-        sl_tools::setSdkLiveTimeOffsetNs(offset_ns);
-        RCLCPP_INFO_STREAM(
-          get_logger(),
-          "SDK monotonic-clock offset captured: "
-            << (offset_ns / 1000000) << " ms");
-      }
-#endif
-      break;
-    }
-
-#if (ZED_SDK_MAJOR_VERSION * 10 + ZED_SDK_MINOR_VERSION) >= 51
-    if (mConnStatus == sl::ERROR_CODE::DRIVER_FAILURE) {
-      RCLCPP_ERROR_STREAM(
-        get_logger(),
-        "ZED X Driver failure: "
-          << sl::toVerbose(mConnStatus)
-          << ". Please verify that the ZED drivers are correctly installed.");
-      return false;
-    }
-#endif
-
-    if (mConnStatus == sl::ERROR_CODE::INVALID_CALIBRATION_FILE) {
-      if (mOpencvCalibFile.empty()) {
-        RCLCPP_ERROR_STREAM(get_logger(), "Calibration file error: " << sl::toVerbose(mConnStatus));
-      } else {
-        RCLCPP_ERROR_STREAM(
-          get_logger(),
-          "If you are using a custom OpenCV calibration file, please check "
-          "the correctness of the path of the calibration file "
-          "in the parameter 'general.optional_opencv_calibration_file': '"
-            << mOpencvCalibFile << "'.");
-        RCLCPP_ERROR(
-          get_logger(),
-          "If the file exists, it may contain invalid information.");
-      }
-      return false;
-    }
-
-#if (ZED_SDK_MAJOR_VERSION * 10 + ZED_SDK_MINOR_VERSION) >= 53
-    if (mConnStatus == sl::ERROR_CODE::CAMERA_EXCEEDS_BANDWIDTH) {
-      RCLCPP_ERROR_STREAM(
-        get_logger(),
-        "GMSL PHY CSI bandwidth overflow detected: "
-          << sl::toVerbose(
-          mConnStatus)
-          <<
-          ". Please reduce the camera resolution or FPS, adjust GMSL branching/hardware, or consult the GMSL documentation for platform limits.");
-      return false;
-    }
-#endif
-
-    if (mSvoMode) {
-      RCLCPP_WARN(
-        get_logger(), "Error opening SVO: %s",
-        sl::toString(mConnStatus).c_str());
-      return false;
-    } else if (mSimMode) {
-      RCLCPP_WARN(
-        get_logger(), "Error connecting to the simulation server: %s",
-        sl::toString(mConnStatus).c_str());
-    } else {
-      RCLCPP_WARN(
-        get_logger(), "Error opening camera: %s",
-        sl::toString(mConnStatus).c_str());
-      if (mConnStatus == sl::ERROR_CODE::CAMERA_DETECTION_ISSUE &&
-        sl_tools::isZEDM(mCamUserModel))
-      {
-        RCLCPP_INFO(
-          get_logger(),
-          "Try to flip the USB3 Type-C connector and verify the USB3 "
-          "connection");
-      } else {
-        RCLCPP_INFO(get_logger(), "Please verify the camera connection");
-      }
-    }
-
-    if (!rclcpp::ok() || mThreadStop) {
-      RCLCPP_INFO(get_logger(), "ZED activation interrupted by user.");
-      return false;
-    }
-
-    if (connectTimer.toc() > mMaxReconnectTemp * mCamTimeoutSec) {
-      RCLCPP_ERROR(get_logger(), "Camera detection timeout");
-      return false;
-    }
-
-    mDiagUpdater.force_update();
-
-    rclcpp::sleep_for(std::chrono::seconds(mCamTimeoutSec));
-  }
-
-  return true;
-}
-
 bool ZedCamera::startCamera()
 {
   RCLCPP_INFO(get_logger(), "=== STARTING CAMERA ===");
@@ -2919,6 +2765,15 @@ bool ZedCamera::startCamera()
   // <---- TF2 Transform
 
   // ----> ZED configuration
+
+  // if (primary_cuda_context) {
+  //   mInitParams.sdk_cuda_ctx = *primary_cuda_context;
+  // } else {
+  //   RCLCPP_INFO(
+  //     get_logger(),
+  //     "No ready CUDA context found, using default ZED SDK context.");
+  // }
+
   if (mSimMode) {  // Simulation?
     RCLCPP_INFO_STREAM(
       get_logger(), "=== CONNECTING TO THE SIMULATION SERVER ["
@@ -3056,17 +2911,140 @@ bool ZedCamera::startCamera()
   }
   // <---- ZED configuration
 
-  // EMILIS: temporary for testing
-  using std::chrono::high_resolution_clock;
-  using std::chrono::duration_cast;
-  using std::chrono::duration;
-  using std::chrono::milliseconds;
+  // ----> Try to connect to a camera, to a stream, or to load an SVO
+  sl_tools::StopWatch connectTimer(get_clock());
 
-  auto t1 = high_resolution_clock::now();
-  if (!openZedCamera()) return false;
-  auto t2 = high_resolution_clock::now();
-  RCLCPP_INFO_STREAM(get_logger(), "timer openZedCamera:"
-    << duration_cast<milliseconds>(t2 - t1).count() << "ms");
+  mThreadStop = false;
+  mGrabStatus = sl::ERROR_CODE::LAST;
+
+  // Tell sl_tools whether timestamps in this process come from a replay
+  // source (SVO / simulation) so slTime2Ros knows not to apply the live
+  // monotonic-clock offset to file-recorded values. Process-wide.
+  sl_tools::setSdkReplayMode(mSvoMode || mSimMode);
+
+#if (ZED_SDK_MAJOR_VERSION * 10 + ZED_SDK_MINOR_VERSION) >= 53
+  if (mUseSdkMonotonicClock) {
+    sl::Camera::setTimestampClock(sl::TIMESTAMP_CLOCK::MONOTONIC_CLOCK);
+    if (sl::Camera::getTimestampClock() != sl::TIMESTAMP_CLOCK::MONOTONIC_CLOCK) {
+      RCLCPP_WARN(
+        get_logger(),
+        "Another node in this process already set the SDK timestamp clock; "
+        "this node's 'general.sdk_use_monotonic_clock' request was ignored.");
+      mUseSdkMonotonicClock = false;
+    } else {
+      RCLCPP_INFO(
+        get_logger(),
+        "SDK timestamp clock set to MONOTONIC_CLOCK (process-wide).");
+    }
+  }
+#endif
+
+  while (1) {
+    rclcpp::sleep_for(500ms);
+
+    mConnStatus = mZed->open(mInitParams);
+
+    if (mConnStatus == sl::ERROR_CODE::SUCCESS) {
+      DEBUG_STREAM_COMM("Opening successfull");
+      mUptimer.tic(); // Sets the beginning of the camera connection time
+#if (ZED_SDK_MAJOR_VERSION * 10 + ZED_SDK_MINOR_VERSION) >= 53
+      if (mUseSdkMonotonicClock && !mSvoMode && !mSimMode) {
+        const sl::Timestamp sdk_now = sl::getCurrentTimeStamp();
+        const rclcpp::Time ros_now = get_clock()->now();
+        const int64_t offset_ns =
+          static_cast<int64_t>(ros_now.nanoseconds()) -
+          static_cast<int64_t>(sdk_now.getNanoseconds());
+        sl_tools::setSdkLiveTimeOffsetNs(offset_ns);
+        RCLCPP_INFO_STREAM(
+          get_logger(),
+          "SDK monotonic-clock offset captured: "
+            << (offset_ns / 1000000) << " ms");
+      }
+#endif
+      break;
+    }
+
+#if (ZED_SDK_MAJOR_VERSION * 10 + ZED_SDK_MINOR_VERSION) >= 51
+    if (mConnStatus == sl::ERROR_CODE::DRIVER_FAILURE) {
+      RCLCPP_ERROR_STREAM(
+        get_logger(),
+        "ZED X Driver failure: "
+          << sl::toVerbose(mConnStatus)
+          << ". Please verify that the ZED drivers are correctly installed.");
+      return false;
+    }
+#endif
+
+    if (mConnStatus == sl::ERROR_CODE::INVALID_CALIBRATION_FILE) {
+      if (mOpencvCalibFile.empty()) {
+        RCLCPP_ERROR_STREAM(get_logger(), "Calibration file error: " << sl::toVerbose(mConnStatus));
+      } else {
+        RCLCPP_ERROR_STREAM(
+          get_logger(),
+          "If you are using a custom OpenCV calibration file, please check "
+          "the correctness of the path of the calibration file "
+          "in the parameter 'general.optional_opencv_calibration_file': '"
+            << mOpencvCalibFile << "'.");
+        RCLCPP_ERROR(
+          get_logger(),
+          "If the file exists, it may contain invalid information.");
+      }
+      return false;
+    }
+
+#if (ZED_SDK_MAJOR_VERSION * 10 + ZED_SDK_MINOR_VERSION) >= 53
+    if (mConnStatus == sl::ERROR_CODE::CAMERA_EXCEEDS_BANDWIDTH) {
+      RCLCPP_ERROR_STREAM(
+        get_logger(),
+        "GMSL PHY CSI bandwidth overflow detected: "
+          << sl::toVerbose(
+          mConnStatus)
+          <<
+          ". Please reduce the camera resolution or FPS, adjust GMSL branching/hardware, or consult the GMSL documentation for platform limits.");
+      return false;
+    }
+#endif
+
+    if (mSvoMode) {
+      RCLCPP_WARN(
+        get_logger(), "Error opening SVO: %s",
+        sl::toString(mConnStatus).c_str());
+      return false;
+    } else if (mSimMode) {
+      RCLCPP_WARN(
+        get_logger(), "Error connecting to the simulation server: %s",
+        sl::toString(mConnStatus).c_str());
+    } else {
+      RCLCPP_WARN(
+        get_logger(), "Error opening camera: %s",
+        sl::toString(mConnStatus).c_str());
+      if (mConnStatus == sl::ERROR_CODE::CAMERA_DETECTION_ISSUE &&
+        sl_tools::isZEDM(mCamUserModel))
+      {
+        RCLCPP_INFO(
+          get_logger(),
+          "Try to flip the USB3 Type-C connector and verify the USB3 "
+          "connection");
+      } else {
+        RCLCPP_INFO(get_logger(), "Please verify the camera connection");
+      }
+    }
+
+    if (!rclcpp::ok() || mThreadStop) {
+      RCLCPP_INFO(get_logger(), "ZED activation interrupted by user.");
+      return false;
+    }
+
+    if (connectTimer.toc() > mMaxReconnectTemp * mCamTimeoutSec) {
+      RCLCPP_ERROR(get_logger(), "Camera detection timeout");
+      return false;
+    }
+
+    mDiagUpdater.force_update();
+
+    rclcpp::sleep_for(std::chrono::seconds(mCamTimeoutSec));
+  }
+  // <---- Try to connect to a camera, to a stream, or to load an SVO
 
   publishCamOpened();
 
