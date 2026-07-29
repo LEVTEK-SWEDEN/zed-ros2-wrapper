@@ -1662,35 +1662,13 @@ void ZedCamera::processVideoDepth()
 {
   DEBUG_VD("=== Process Video/Depth ===");
 
-  // If no subscribers, do not retrieve data
-  if (areVideoDepthSubscribed()) {
-    DEBUG_VD(" * [processVideoDepth] vd_lock -> defer");
-    std::unique_lock<std::mutex> vd_lock(mVdMutex, std::defer_lock);
-
-    DEBUG_VD(" * [processVideoDepth] vd_lock -> try_lock");
-    if (vd_lock.try_lock()) {
-      bool gpu = false;
+  bool gpu = false;
 #ifdef FOUND_ISAAC_ROS_NITROS
-      if (!_nitrosDisabled) {
-        gpu = true;
-      }
-#endif
-      retrieveVideoDepth(gpu);
-
-      // Signal Video/Depth thread that new data is ready
-      mVdDataReady = true;
-      mVdPublishing = true;
-      mVdDataReadyCondVar.notify_one();
-    } else {
-      DEBUG_VD(" * [processVideoDepth] vd_lock not locked");
-    }
-  } else {
-    mVdPublishing = false;
-    DEBUG_VD(" * [processVideoDepth] No video/depth subscribers");
-
-    // Publish camera infos even if no video/depth subscribers are present
-    publishCameraInfos();
+  if (!_nitrosDisabled) {
+    gpu = true;
   }
+#endif
+  retrieveVideoDepth(gpu);
   DEBUG_VD("=== Process Video/Depth done ===");
 }
 
@@ -1713,10 +1691,10 @@ void ZedCamera::retrieveVideoDepth(bool gpu)
 
   if (retrieved_video) {
     DEBUG_STREAM_VD(" *** Video Data retrieved ***");
-    mSdkGrabTS = mZed->getTimestamp(sl::TIME_REFERENCE::IMAGE);
+    mSdkGrabTS[mGrabBufIdx] = mZed->getTimestamp(sl::TIME_REFERENCE::IMAGE);
     auto now = mZed->getTimestamp(sl::TIME_REFERENCE::CURRENT);
     DEBUG_STREAM_VD(
-      " * Video Latency: " << static_cast<double>(now - mSdkGrabTS) * 1e-9 << " sec");
+      " * Video Latency: " << static_cast<double>(now - mSdkGrabTS[mGrabBufIdx]) * 1e-9 << " sec");
   }
 
   // Don't retrieve depth if we don't need it this frame (fine to check here, we are
@@ -1730,10 +1708,10 @@ void ZedCamera::retrieveVideoDepth(bool gpu)
 
   if (retrieved_depth) {
     DEBUG_STREAM_VD(" *** Depth Data retrieved ***");
-    mSdkDepthGrabTS = mZed->getTimestamp(sl::TIME_REFERENCE::IMAGE);
+    mSdkDepthGrabTS[mPubBufIdx] = mZed->getTimestamp(sl::TIME_REFERENCE::IMAGE);
     auto now = mZed->getTimestamp(sl::TIME_REFERENCE::CURRENT);
     DEBUG_STREAM_VD(
-      " * Depth Latency: " << static_cast<double>(now - mSdkDepthGrabTS) * 1e-9 << " sec");
+      " * Depth Latency: " << static_cast<double>(now - mSdkDepthGrabTS[mGrabBufIdx]) * 1e-9 << " sec");
   }
 
   DEBUG_VD(" *** Retrieving Video/Depth Data DONE ***");
@@ -1745,7 +1723,7 @@ bool ZedCamera::retrieveLeftImage(bool gpu)
     DEBUG_VD(" * Retrieving Left image");
     bool ok = sl::ERROR_CODE::SUCCESS ==
       mZed->retrieveImage(
-      mMatLeft,
+      mMatLeft[mGrabBufIdx],
 #if (ZED_SDK_MAJOR_VERSION * 10 + ZED_SDK_MINOR_VERSION) >= 51
       m24bitMode ? sl::VIEW::LEFT_BGR : sl::VIEW::LEFT_BGRA,
 #else
@@ -1767,7 +1745,7 @@ bool ZedCamera::retrieveLeftRawImage(bool gpu)
     DEBUG_VD(" * Retrieving Left raw image");
     bool ok = sl::ERROR_CODE::SUCCESS ==
       mZed->retrieveImage(
-      mMatLeftRaw,
+      mMatLeftRaw[mGrabBufIdx],
 #if (ZED_SDK_MAJOR_VERSION * 10 + ZED_SDK_MINOR_VERSION) >= 51
       m24bitMode ? sl::VIEW::LEFT_UNRECTIFIED_BGR : sl::VIEW::LEFT_UNRECTIFIED_BGRA,
 #else
@@ -1788,7 +1766,7 @@ bool ZedCamera::retrieveRightImage(bool gpu)
     DEBUG_VD(" * Retrieving Right image");
     bool ok = sl::ERROR_CODE::SUCCESS ==
       mZed->retrieveImage(
-      mMatRight,
+      mMatRight[mGrabBufIdx],
 #if (ZED_SDK_MAJOR_VERSION * 10 + ZED_SDK_MINOR_VERSION) >= 51
       m24bitMode ? sl::VIEW::RIGHT_BGR : sl::VIEW::RIGHT_BGRA,
 #else
@@ -1809,7 +1787,7 @@ bool ZedCamera::retrieveRightRawImage(bool gpu)
     DEBUG_VD(" * Retrieving Right raw image");
     bool ok = sl::ERROR_CODE::SUCCESS ==
       mZed->retrieveImage(
-      mMatRightRaw,
+      mMatRightRaw[mGrabBufIdx],
 #if (ZED_SDK_MAJOR_VERSION * 10 + ZED_SDK_MINOR_VERSION) >= 51
       m24bitMode ? sl::VIEW::RIGHT_UNRECTIFIED_BGR : sl::VIEW::RIGHT_UNRECTIFIED_BGRA,
 #else
@@ -1830,7 +1808,7 @@ bool ZedCamera::retrieveLeftGrayImage(bool gpu)
     DEBUG_VD(" * Retrieving Left gray image");
     bool ok = sl::ERROR_CODE::SUCCESS ==
       mZed->retrieveImage(
-      mMatLeftGray, sl::VIEW::LEFT_GRAY,
+      mMatLeftGray[mGrabBufIdx], sl::VIEW::LEFT_GRAY,
       gpu ? sl::MEM::GPU : sl::MEM::CPU, mMatResol);
     if (ok) {
       DEBUG_STREAM_VD(" * Left gray image retrieved into " << (gpu ? "GPU" : "CPU") << " memory");
@@ -1846,7 +1824,7 @@ bool ZedCamera::retrieveLeftRawGrayImage(bool gpu)
     DEBUG_VD(" * Retrieving Left gray raw image");
     bool ok = sl::ERROR_CODE::SUCCESS ==
       mZed->retrieveImage(
-      mMatLeftRawGray, sl::VIEW::LEFT_UNRECTIFIED_GRAY,
+      mMatLeftRawGray[mGrabBufIdx], sl::VIEW::LEFT_UNRECTIFIED_GRAY,
       gpu ? sl::MEM::GPU : sl::MEM::CPU, mMatResol);
     if (ok) {
       DEBUG_STREAM_VD(
@@ -1864,7 +1842,7 @@ bool ZedCamera::retrieveRightGrayImage(bool gpu)
     DEBUG_VD(" * Retrieving Right gray image");
     bool ok = sl::ERROR_CODE::SUCCESS ==
       mZed->retrieveImage(
-      mMatRightGray, sl::VIEW::RIGHT_GRAY,
+      mMatRightGray[mGrabBufIdx], sl::VIEW::RIGHT_GRAY,
       gpu ? sl::MEM::GPU : sl::MEM::CPU, mMatResol);
     if (ok) {
       DEBUG_STREAM_VD(" * Right gray image retrieved into " << (gpu ? "GPU" : "CPU") << " memory");
@@ -1880,7 +1858,7 @@ bool ZedCamera::retrieveRightRawGrayImage(bool gpu)
     DEBUG_VD(" * Retrieving Right gray raw image");
     bool ok = sl::ERROR_CODE::SUCCESS ==
       mZed->retrieveImage(
-      mMatRightRawGray, sl::VIEW::RIGHT_UNRECTIFIED_GRAY,
+      mMatRightRawGray[mGrabBufIdx], sl::VIEW::RIGHT_UNRECTIFIED_GRAY,
       gpu ? sl::MEM::GPU : sl::MEM::CPU, mMatResol);
     if (ok) {
       DEBUG_STREAM_VD(
@@ -1897,7 +1875,7 @@ bool ZedCamera::retrieveDepthMap(bool gpu)
     DEBUG_STREAM_VD(" * Retrieving Depth Map");
     bool ok = sl::ERROR_CODE::SUCCESS ==
       mZed->retrieveMeasure(
-      mMatDepth, sl::MEASURE::DEPTH,
+      mMatDepth[mGrabBufIdx], sl::MEASURE::DEPTH,
       gpu ? sl::MEM::GPU : sl::MEM::CPU, mMatResol);
     if (ok) {
       DEBUG_STREAM_VD(" * Depth map retrieved into " << (gpu ? "GPU" : "CPU") << " memory");
@@ -1913,7 +1891,7 @@ bool ZedCamera::retrieveDisparity()
     DEBUG_STREAM_VD(" * Retrieving Disparity");
     bool ok = sl::ERROR_CODE::SUCCESS ==
       mZed->retrieveMeasure(
-      mMatDisp, sl::MEASURE::DISPARITY,
+      mMatDisp[mGrabBufIdx], sl::MEASURE::DISPARITY,
       sl::MEM::CPU, mMatResol);
     if (ok) {
       DEBUG_VD(" * Disparity map retrieved");
@@ -1929,7 +1907,7 @@ bool ZedCamera::retrieveConfidence(bool gpu)
     DEBUG_STREAM_VD(" * Retrieving Confidence");
     bool ok = sl::ERROR_CODE::SUCCESS ==
       mZed->retrieveMeasure(
-      mMatConf, sl::MEASURE::CONFIDENCE,
+      mMatConf[mGrabBufIdx], sl::MEASURE::CONFIDENCE,
       gpu ? sl::MEM::GPU : sl::MEM::CPU, mMatResol);
     if (ok) {
       DEBUG_STREAM_VD(" * Confidence map retrieved into " << (gpu ? "GPU" : "CPU") << " memory");
@@ -1943,7 +1921,7 @@ bool ZedCamera::retrieveDepthInfo()
 {
   if (mDepthInfoSubCount > 0) {
     bool ok = sl::ERROR_CODE::SUCCESS ==
-      mZed->getCurrentMinMaxDepth(mMinDepth, mMaxDepth);
+      mZed->getCurrentMinMaxDepth(mMinDepth[mGrabBufIdx], mMaxDepth[mGrabBufIdx]);
     if (ok) {
       DEBUG_VD(" * Depth info retrieved");
     }
@@ -1955,16 +1933,13 @@ bool ZedCamera::retrieveDepthInfo()
 void ZedCamera::publishVideoDepth(rclcpp::Time & out_pub_ts)
 {
   DEBUG_VD("=== Publish Video and Depth topics === ");
+
+  rclcpp::Time timeStamp; // default constructed -> is zero nanoseconds
+  if (!(mSdkLastPublishTS < mSdkGrabTS[mPubBufIdx])) return;
+
   sl_tools::StopWatch vdElabTimer(get_clock());
 
-
-  vdElabTimer.tic();
-  rclcpp::Time timeStamp;
-
-  if (!checkGrabAndUpdateTimestamp(timeStamp)) {
-    return;
-  }
-
+  mSdkLastPublishTS = mSdkGrabTS[mPubBufIdx];
   publishLeftAndRgbImages(timeStamp);
   publishLeftRawAndRgbRawImages(timeStamp);
   publishLeftGrayAndRgbGrayImages(timeStamp);
@@ -1977,8 +1952,8 @@ void ZedCamera::publishVideoDepth(rclcpp::Time & out_pub_ts)
   publishStereoRawImages(timeStamp);
 
 
-  if (mLastTs_depthGrab != mSdkLastDepthPublishTS) {
-    mSdkLastDepthPublishTS = mLastTs_depthGrab;
+  if (mSdkLastDepthPublishTS < mSdkDepthGrabTS[mPubBufIdx]) {
+    mSdkLastDepthPublishTS = mSdkDepthGrabTS[mPubBufIdx];
     publishDepthImage(timeStamp);
     publishConfidenceMap(timeStamp);
     publishDisparityImage(timeStamp);
@@ -1989,7 +1964,7 @@ void ZedCamera::publishVideoDepth(rclcpp::Time & out_pub_ts)
 
   mVideoDepthElabMean_sec->addValue(vdElabTimer.toc());
 
-  out_pub_ts = timeStamp;
+  out_pub_ts = timeStamp; // This variable is never used? Why is it here?
 
   mPublishPeriodMean_sec->addValue(mPublishFreqTimer.toc());
   mPublishFreqTimer.tic();
@@ -1999,90 +1974,91 @@ void ZedCamera::publishVideoDepth(rclcpp::Time & out_pub_ts)
 
 // Helper functions for publishVideoDepth
 
-void ZedCamera::checkRgbDepthSync()
-{
-  sl::Timestamp ts_rgb = 0;
-  sl::Timestamp ts_depth = 0;
+// void ZedCamera::checkRgbDepthSync()
+// {
+//   sl::Timestamp ts_rgb = 0;
+//   sl::Timestamp ts_depth = 0;
 
-  if (mRgbSubscribed && (mDepthSubCount > 0 || mDepthInfoSubCount > 0)) {
-    ts_rgb = mMatLeft.timestamp;
-    ts_depth = mMatDepth.timestamp;
+//   if (mRgbSubscribed && (mDepthSubCount > 0 || mDepthInfoSubCount > 0)) {
+//     ts_rgb = mMatLeft.timestamp;
+//     ts_depth = mMatDepth.timestamp;
 
-    if (mRgbSubscribed &&
-      (ts_rgb.data_ns != 0 && (ts_depth.data_ns != ts_rgb.data_ns)))
-    {
-      RCLCPP_WARN_STREAM(
-        get_logger(),
-        " !!!!! DEPTH/RGB ASYNC!!!! - Delta: "
-          << 1e-9 * static_cast<int64_t>(ts_depth.data_ns - ts_rgb.data_ns) 
-          << " sec");
-      RCLCPP_WARN(
-        get_logger(),
-        " NOTE: this should never happen, please contact the node "
-        "maintainer in case you get this warning.");
-    }
-  }
-}
+//     if (mRgbSubscribed &&
+//       (ts_rgb.data_ns != 0 && (ts_depth.data_ns != ts_rgb.data_ns)))
+//     {
+//       RCLCPP_WARN_STREAM(
+//         get_logger(),
+//         " !!!!! DEPTH/RGB ASYNC!!!! - Delta: "
+//           << 1e-9 * static_cast<int64_t>(ts_depth.data_ns - ts_rgb.data_ns) 
+//           << " sec");
+//       RCLCPP_WARN(
+//         get_logger(),
+//         " NOTE: this should never happen, please contact the node "
+//         "maintainer in case you get this warning.");
+//     }
+//   }
+// }
 
-bool ZedCamera::checkGrabAndUpdateTimestamp(rclcpp::Time & out_pub_ts)
-{
-  if (mSdkGrabTS.getNanoseconds() == mLastTs_grab.getNanoseconds()) {
-    out_pub_ts = TIMEZERO_ROS;
-    DEBUG_VD(" * publishVideoDepth: ignoring not update data");
-    DEBUG_STREAM_VD(
-      " * Latest Ts: " << mLastTs_grab.getNanoseconds() << " - New Ts: " <<
-        mSdkGrabTS.getNanoseconds());
-    return false;
-  }
 
-  if (mSdkGrabTS.data_ns != 0) {
-    if (!mSvoMode) {
-      double period_sec =
-        static_cast<double>(mSdkGrabTS.data_ns - mLastTs_grab.data_ns) / 1e9;
-      DEBUG_STREAM_VD(
-        " * VIDEO/DEPTH PUB LAST PERIOD: "
-          << period_sec << " sec @" << 1. / period_sec << " Hz / Expected: " << 1. / mVdPubRate <<
-          " sec @" << mVdPubRate <<
-          " Hz");
+// bool ZedCamera::checkGrabAndUpdateTimestamp(rclcpp::Time & out_pub_ts)
+// {
+//   if (mSdkGrabTS.getNanoseconds() == mLastTs_grab.getNanoseconds()) {
+//     out_pub_ts = TIMEZERO_ROS;
+//     DEBUG_VD(" * publishVideoDepth: ignoring not update data");
+//     DEBUG_STREAM_VD(
+//       " * Latest Ts: " << mLastTs_grab.getNanoseconds() << " - New Ts: " <<
+//         mSdkGrabTS.getNanoseconds());
+//     return false;
+//   }
 
-      mVideoDepthPeriodMean_sec->addValue(period_sec);
-      DEBUG_STREAM_VD(
-        " * VIDEO/DEPTH PUB MEAN PERIOD: "
-          << mVideoDepthPeriodMean_sec->getAvg() << " sec @"
-          << 1. / mVideoDepthPeriodMean_sec->getAvg() << " Hz / Expected: " << 1. / mVdPubRate <<
-          " sec @" << mVdPubRate <<
-          " Hz");
+//   if (mSdkGrabTS.data_ns != 0) {
+//     if (!mSvoMode) {
+//       double period_sec =
+//         static_cast<double>(mSdkGrabTS.data_ns - mLastTs_grab.data_ns) / 1e9;
+//       DEBUG_STREAM_VD(
+//         " * VIDEO/DEPTH PUB LAST PERIOD: "
+//           << period_sec << " sec @" << 1. / period_sec << " Hz / Expected: " << 1. / mVdPubRate <<
+//           " sec @" << mVdPubRate <<
+//           " Hz");
 
-      mLastTs_grab = mSdkGrabTS;
-    }
-  }
+//       mVideoDepthPeriodMean_sec->addValue(period_sec);
+//       DEBUG_STREAM_VD(
+//         " * VIDEO/DEPTH PUB MEAN PERIOD: "
+//           << mVideoDepthPeriodMean_sec->getAvg() << " sec @"
+//           << 1. / mVideoDepthPeriodMean_sec->getAvg() << " Hz / Expected: " << 1. / mVdPubRate <<
+//           " sec @" << mVdPubRate <<
+//           " Hz");
 
-  if (mSdkDepthGrabTS.getNanoseconds() != mLastTs_depthGrab.getNanoseconds()
-      && mSdkDepthGrabTS.data_ns != 0 
-      && !mSvoMode) {
-    double period_sec =
-      static_cast<double>(mSdkDepthGrabTS.data_ns - mLastTs_depthGrab.data_ns) / 1e9;
+//       mLastTs_grab = mSdkGrabTS;
+//     }
+//   }
 
-    mDepthPeriodMean_sec->addValue(period_sec);
-    mLastTs_depthGrab = mSdkDepthGrabTS;
-  }
+//   if (mSdkDepthGrabTS.getNanoseconds() != mLastTs_depthGrab.getNanoseconds()
+//       && mSdkDepthGrabTS.data_ns != 0 
+//       && !mSvoMode) {
+//     double period_sec =
+//       static_cast<double>(mSdkDepthGrabTS.data_ns - mLastTs_depthGrab.data_ns) / 1e9;
 
-  if (mSvoMode) {
-    out_pub_ts = mUsePubTimestamps ? get_clock()->now() : mFrameTimestamp;
-  } else if (mSimMode) {
-    if (mUseSimTime) {
-      out_pub_ts = get_clock()->now();
-    } else {
-      out_pub_ts = mUsePubTimestamps ? get_clock()->now() :
-        sl_tools::slTime2Ros(mZed->getTimestamp(sl::TIME_REFERENCE::IMAGE));
-    }
-  } else {
-    out_pub_ts = mUsePubTimestamps ? get_clock()->now() : sl_tools::slTime2Ros(
-      mSdkGrabTS,
-      get_clock()->get_clock_type());
-  }
-  return true;
-}
+//     mDepthPeriodMean_sec->addValue(period_sec);
+//     mLastTs_depthGrab = mSdkDepthGrabTS;
+//   }
+
+//   if (mSvoMode) {
+//     out_pub_ts = mUsePubTimestamps ? get_clock()->now() : mFrameTimestamp;
+//   } else if (mSimMode) {
+//     if (mUseSimTime) {
+//       out_pub_ts = get_clock()->now();
+//     } else {
+//       out_pub_ts = mUsePubTimestamps ? get_clock()->now() :
+//         sl_tools::slTime2Ros(mZed->getTimestamp(sl::TIME_REFERENCE::IMAGE));
+//     }
+//   } else {
+//     out_pub_ts = mUsePubTimestamps ? get_clock()->now() : sl_tools::slTime2Ros(
+//       mSdkGrabTS,
+//       get_clock()->get_clock_type());
+//   }
+//   return true;
+// }
 
 void ZedCamera::publishLeftAndRgbImages(const rclcpp::Time & t)
 {
@@ -2091,12 +2067,12 @@ void ZedCamera::publishLeftAndRgbImages(const rclcpp::Time & t)
 
     if (_nitrosDisabled) {
       publishImageWithInfo(
-        mMatLeft, mPubIpcLeft, mPubLeft, mPubLeftCamInfo, mPubLeftCamInfoTrans,
+        mMatLeft[mPubBufIdx], mPubIpcLeft, mPubLeft, mPubLeftCamInfo, mPubLeftCamInfoTrans,
         mLeftCamInfoMsg, mLeftCamOptFrameId, t);
     } else {
 #ifdef FOUND_ISAAC_ROS_NITROS
       publishImageWithInfo(
-        mMatLeft, mNitrosPubLeft, mPubLeftCamInfo, mPubLeftCamInfoTrans, mLeftCamInfoMsg,
+        mMatLeft[mPubBufIdx], mNitrosPubLeft, mPubLeftCamInfo, mPubLeftCamInfoTrans, mLeftCamInfoMsg,
         mLeftCamOptFrameId, t);
 #endif
     }
@@ -2110,12 +2086,12 @@ void ZedCamera::publishLeftAndRgbImages(const rclcpp::Time & t)
 
     if (_nitrosDisabled) {
       publishImageWithInfo(
-        mMatLeft, mPubIpcRgb, mPubRgb, mPubRgbCamInfo, mPubRgbCamInfoTrans, mLeftCamInfoMsg,
+        mMatLeft[mPubBufIdx], mPubIpcRgb, mPubRgb, mPubRgbCamInfo, mPubRgbCamInfoTrans, mLeftCamInfoMsg,
         mLeftCamOptFrameId, t);
     } else {
 #ifdef FOUND_ISAAC_ROS_NITROS
       publishImageWithInfo(
-        mMatLeft, mNitrosPubRgb, mPubRgbCamInfo, mPubRgbCamInfoTrans, mLeftCamInfoMsg,
+        mMatLeft[mPubBufIdx], mNitrosPubRgb, mPubRgbCamInfo, mPubRgbCamInfoTrans, mLeftCamInfoMsg,
         mLeftCamOptFrameId, t);
 #endif
     }
@@ -2131,13 +2107,13 @@ void ZedCamera::publishLeftRawAndRgbRawImages(const rclcpp::Time & t)
     DEBUG_STREAM_VD(" * mLeftRawSubCount: " << mLeftRawSubCount);
     if (_nitrosDisabled) {
       publishImageWithInfo(
-        mMatLeftRaw, mPubIpcRawLeft, mPubRawLeft,
+        mMatLeftRaw[mPubBufIdx], mPubIpcRawLeft, mPubRawLeft,
         mPubRawLeftCamInfo, mPubRawLeftCamInfoTrans,
         mLeftCamInfoRawMsg, mLeftCamOptFrameId, t);
     } else {
 #ifdef FOUND_ISAAC_ROS_NITROS
       publishImageWithInfo(
-        mMatLeftRaw, mNitrosPubRawLeft, mPubRawLeftCamInfo, mPubRawLeftCamInfoTrans,
+        mMatLeftRaw[mPubBufIdx], mNitrosPubRawLeft, mPubRawLeftCamInfo, mPubRawLeftCamInfoTrans,
         mLeftCamInfoRawMsg, mLeftCamOptFrameId, t);
 #endif
     }
@@ -2150,12 +2126,12 @@ void ZedCamera::publishLeftRawAndRgbRawImages(const rclcpp::Time & t)
     DEBUG_STREAM_VD(" * mRgbRawSubCount: " << mRgbRawSubCount);
     if (_nitrosDisabled) {
       publishImageWithInfo(
-        mMatLeftRaw, mPubIpcRawRgb, mPubRawRgb, mPubRawRgbCamInfo, mPubRawRgbCamInfoTrans,
+        mMatLeftRaw[mPubBufIdx], mPubIpcRawRgb, mPubRawRgb, mPubRawRgbCamInfo, mPubRawRgbCamInfoTrans,
         mLeftCamInfoRawMsg, mLeftCamOptFrameId, t);
     } else {
 #ifdef FOUND_ISAAC_ROS_NITROS
       publishImageWithInfo(
-        mMatLeftRaw, mNitrosPubRawRgb, mPubRawRgbCamInfo, mPubRawRgbCamInfoTrans,
+        mMatLeftRaw[mPubBufIdx], mNitrosPubRawRgb, mPubRawRgbCamInfo, mPubRawRgbCamInfoTrans,
         mLeftCamInfoRawMsg, mLeftCamOptFrameId, t);
 #endif
     }
@@ -2172,13 +2148,13 @@ void ZedCamera::publishLeftGrayAndRgbGrayImages(const rclcpp::Time & t)
 
     if (_nitrosDisabled) {
       publishImageWithInfo(
-        mMatLeftGray, mPubIpcLeftGray, mPubLeftGray,
+        mMatLeftGray[mPubBufIdx], mPubIpcLeftGray, mPubLeftGray,
         mPubLeftGrayCamInfo, mPubLeftGrayCamInfoTrans,
         mLeftCamInfoMsg, mLeftCamOptFrameId, t);
     } else {
 #ifdef FOUND_ISAAC_ROS_NITROS
       publishImageWithInfo(
-        mMatLeftGray, mNitrosPubLeftGray, mPubLeftGrayCamInfo, mPubLeftGrayCamInfoTrans,
+        mMatLeftGray[mPubBufIdx], mNitrosPubLeftGray, mPubLeftGrayCamInfo, mPubLeftGrayCamInfoTrans,
         mLeftCamInfoMsg, mLeftCamOptFrameId, t);
 #endif
     }
@@ -2191,13 +2167,13 @@ void ZedCamera::publishLeftGrayAndRgbGrayImages(const rclcpp::Time & t)
     DEBUG_STREAM_VD(" * mRgbGraySubCount: " << mRgbGraySubCount);
     if (_nitrosDisabled) {
       publishImageWithInfo(
-        mMatLeftGray, mPubIpcRgbGray, mPubRgbGray,
+        mMatLeftGray[mPubBufIdx], mPubIpcRgbGray, mPubRgbGray,
         mPubRgbGrayCamInfo, mPubRgbGrayCamInfoTrans,
         mLeftCamInfoMsg, mLeftCamOptFrameId, t);
     } else {
 #ifdef FOUND_ISAAC_ROS_NITROS
       publishImageWithInfo(
-        mMatLeftGray, mNitrosPubRgbGray, mPubRgbGrayCamInfo, mPubRgbGrayCamInfoTrans,
+        mMatLeftGray[mPubBufIdx], mNitrosPubRgbGray, mPubRgbGrayCamInfo, mPubRgbGrayCamInfoTrans,
         mLeftCamInfoMsg, mLeftCamOptFrameId, t);
 #endif
     }
@@ -2213,13 +2189,13 @@ void ZedCamera::publishLeftRawGrayAndRgbRawGrayImages(const rclcpp::Time & t)
     DEBUG_STREAM_VD(" * mLeftGrayRawSubCount: " << mLeftGrayRawSubCount);
     if (_nitrosDisabled) {
       publishImageWithInfo(
-        mMatLeftRawGray, mPubIpcRawLeftGray, mPubRawLeftGray,
+        mMatLeftRawGray[mPubBufIdx], mPubIpcRawLeftGray, mPubRawLeftGray,
         mPubRawLeftGrayCamInfo, mPubRawLeftGrayCamInfoTrans,
         mLeftCamInfoRawMsg, mLeftCamOptFrameId, t);
     } else {
 #ifdef FOUND_ISAAC_ROS_NITROS
       publishImageWithInfo(
-        mMatLeftRawGray, mNitrosPubRawLeftGray, mPubRawLeftGrayCamInfo, mPubRawLeftGrayCamInfoTrans,
+        mMatLeftRawGray[mPubBufIdx], mNitrosPubRawLeftGray, mPubRawLeftGrayCamInfo, mPubRawLeftGrayCamInfoTrans,
         mLeftCamInfoRawMsg, mLeftCamOptFrameId, t);
 #endif
     }
@@ -2232,13 +2208,13 @@ void ZedCamera::publishLeftRawGrayAndRgbRawGrayImages(const rclcpp::Time & t)
     DEBUG_STREAM_VD(" * mRgbGrayRawSubCount: " << mRgbGrayRawSubCount);
     if (_nitrosDisabled) {
       publishImageWithInfo(
-        mMatLeftRawGray, mPubIpcRawRgbGray, mPubRawRgbGray,
+        mMatLeftRawGray[mPubBufIdx], mPubIpcRawRgbGray, mPubRawRgbGray,
         mPubRawRgbGrayCamInfo, mPubRawRgbGrayCamInfoTrans,
         mLeftCamInfoRawMsg, mLeftCamOptFrameId, t);
     } else {
 #ifdef FOUND_ISAAC_ROS_NITROS
       publishImageWithInfo(
-        mMatLeftRawGray, mNitrosPubRawRgbGray, mPubRawRgbGrayCamInfo, mPubRawRgbGrayCamInfoTrans,
+        mMatLeftRawGray[mPubBufIdx], mNitrosPubRawRgbGray, mPubRawRgbGrayCamInfo, mPubRawRgbGrayCamInfoTrans,
         mLeftCamInfoRawMsg, mLeftCamOptFrameId, t);
 #endif
     }
@@ -2254,12 +2230,12 @@ void ZedCamera::publishRightImages(const rclcpp::Time & t)
     DEBUG_STREAM_VD(" * mRightSubCount: " << mRightSubCount);
     if (_nitrosDisabled) {
       publishImageWithInfo(
-        mMatRight, mPubIpcRight, mPubRight, mPubRightCamInfo, mPubRightCamInfoTrans,
+        mMatRight[mPubBufIdx], mPubIpcRight, mPubRight, mPubRightCamInfo, mPubRightCamInfoTrans,
         mRightCamInfoMsg, mRightCamOptFrameId, t);
     } else {
 #ifdef FOUND_ISAAC_ROS_NITROS
       publishImageWithInfo(
-        mMatRight, mNitrosPubRight, mPubRightCamInfo, mPubRightCamInfoTrans,
+        mMatRight[mPubBufIdx], mNitrosPubRight, mPubRightCamInfo, mPubRightCamInfoTrans,
         mRightCamInfoMsg, mRightCamOptFrameId, t);
 #endif
     }
@@ -2275,13 +2251,13 @@ void ZedCamera::publishRightRawImages(const rclcpp::Time & t)
     DEBUG_STREAM_VD(" * mRightRawSubCount: " << mRightRawSubCount);
     if (_nitrosDisabled) {
       publishImageWithInfo(
-        mMatRightRaw, mPubIpcRawRight, mPubRawRight,
+        mMatRightRaw[mPubBufIdx], mPubIpcRawRight, mPubRawRight,
         mPubRawRightCamInfo, mPubRawRightCamInfoTrans,
         mRightCamInfoRawMsg, mRightCamOptFrameId, t);
     } else {
 #ifdef FOUND_ISAAC_ROS_NITROS
       publishImageWithInfo(
-        mMatRightRaw, mNitrosPubRawRight, mPubRawRightCamInfo, mPubRawRightCamInfoTrans,
+        mMatRightRaw[mPubBufIdx], mNitrosPubRawRight, mPubRawRightCamInfo, mPubRawRightCamInfoTrans,
         mRightCamInfoRawMsg, mRightCamOptFrameId, t);
 #endif
     }
@@ -2297,13 +2273,13 @@ void ZedCamera::publishRightGrayImages(const rclcpp::Time & t)
     DEBUG_STREAM_VD(" * mRightGraySubCount: " << mRightGraySubCount);
     if (_nitrosDisabled) {
       publishImageWithInfo(
-        mMatRightGray, mPubIpcRightGray, mPubRightGray,
+        mMatRightGray[mPubBufIdx], mPubIpcRightGray, mPubRightGray,
         mPubRightGrayCamInfo, mPubRightGrayCamInfoTrans,
         mRightCamInfoMsg, mRightCamOptFrameId, t);
     } else {
 #ifdef FOUND_ISAAC_ROS_NITROS
       publishImageWithInfo(
-        mMatRightGray, mNitrosPubRightGray, mPubRightGrayCamInfo, mPubRightGrayCamInfoTrans,
+        mMatRightGray[mPubBufIdx], mNitrosPubRightGray, mPubRightGrayCamInfo, mPubRightGrayCamInfoTrans,
         mRightCamInfoMsg, mRightCamOptFrameId, t);
 #endif
     }
@@ -2319,13 +2295,13 @@ void ZedCamera::publishRightRawGrayImages(const rclcpp::Time & t)
     DEBUG_STREAM_VD(" * mRightGrayRawSubCount: " << mRightGrayRawSubCount);
     if (_nitrosDisabled) {
       publishImageWithInfo(
-        mMatRightRawGray, mPubIpcRawRightGray, mPubRawRightGray,
+        mMatRightRawGray[mPubBufIdx], mPubIpcRawRightGray, mPubRawRightGray,
         mPubRawRightGrayCamInfo, mPubRawRightGrayCamInfoTrans,
         mRightCamInfoRawMsg, mRightCamOptFrameId, t);
     } else {
 #ifdef FOUND_ISAAC_ROS_NITROS
       publishImageWithInfo(
-        mMatRightRawGray, mNitrosPubRawRightGray, mPubRawRightGrayCamInfo,
+        mMatRightRawGray[mPubBufIdx], mNitrosPubRawRightGray, mPubRawRightGrayCamInfo,
         mPubRawRightGrayCamInfoTrans,
         mRightCamInfoRawMsg, mRightCamOptFrameId, t);
 #endif
@@ -2341,7 +2317,7 @@ void ZedCamera::publishStereoImages(const rclcpp::Time & t)
   if (mStereoSubCount > 0) {
     DEBUG_STREAM_VD(" * mStereoSubCount: " << mStereoSubCount);
     auto combined = sl_tools::imagesToROSmsg(
-      mMatLeft, mMatRight, mCenterFrameId, t, mUsePubTimestamps);
+      mMatLeft[mPubBufIdx], mMatRight[mPubBufIdx], mCenterFrameId, t, mUsePubTimestamps);
     DEBUG_STREAM_VD(" * Publishing SIDE-BY-SIDE message");
     try {
       // TypeAdapter publisher handles raw + zero-copy
@@ -2367,7 +2343,7 @@ void ZedCamera::publishStereoRawImages(const rclcpp::Time & t)
   if (mStereoRawSubCount > 0) {
     DEBUG_STREAM_VD(" * mStereoRawSubCount: " << mStereoRawSubCount);
     auto combined = sl_tools::imagesToROSmsg(
-      mMatLeftRaw, mMatRightRaw, mCenterFrameId, t, mUsePubTimestamps);
+      mMatLeftRaw[mPubBufIdx], mMatRightRaw[mPubBufIdx], mCenterFrameId, t, mUsePubTimestamps);
     DEBUG_STREAM_VD(" * Publishing SIDE-BY-SIDE RAW message");
     try {
       // TypeAdapter publisher handles raw + zero-copy
@@ -2391,7 +2367,7 @@ void ZedCamera::publishStereoRawImages(const rclcpp::Time & t)
 void ZedCamera::publishDepthImage(const rclcpp::Time & t)
 {
   if (mDepthSubCount > 0)
-    publishDepthMapWithInfo(mMatDepth, t);
+    publishDepthMapWithInfo(mMatDepth[mPubBufIdx], t);
 }
 
 void ZedCamera::publishConfidenceMap(const rclcpp::Time & t)
@@ -2400,12 +2376,12 @@ void ZedCamera::publishConfidenceMap(const rclcpp::Time & t)
     DEBUG_STREAM_VD(" * mConfMapSubCount: " << mConfMapSubCount);
     if (_nitrosDisabled) {
       publishImageWithInfo(
-        mMatConf, mPubIpcConfMap, mPubConfMap, mPubConfMapCamInfo, mPubConfMapCamInfoTrans,
+        mMatConf[mPubBufIdx], mPubIpcConfMap, mPubConfMap, mPubConfMapCamInfo, mPubConfMapCamInfoTrans,
         mLeftCamInfoMsg, mLeftCamOptFrameId, t);
     } else {
 #ifdef FOUND_ISAAC_ROS_NITROS
       publishImageWithInfo(
-        mMatConf, mNitrosPubConfMap, mPubConfMapCamInfo, mPubConfMapCamInfoTrans,
+        mMatConf[mPubBufIdx], mNitrosPubConfMap, mPubConfMapCamInfo, mPubConfMapCamInfoTrans,
         mLeftCamInfoMsg, mLeftCamOptFrameId, t);
 #endif
     }
@@ -2418,7 +2394,7 @@ void ZedCamera::publishConfidenceMap(const rclcpp::Time & t)
 void ZedCamera::publishDisparityImage(const rclcpp::Time & t)
 {
   if (mDisparitySubCount > 0) {
-    publishDisparity(mMatDisp, t);
+    publishDisparity(mMatDisp[mPubBufIdx], t);
   }
 }
 
@@ -2428,8 +2404,8 @@ void ZedCamera::publishDepthInfo(const rclcpp::Time & t)
     auto depthInfoMsg = std::make_unique<zed_msgs::msg::DepthInfoStamped>();
     depthInfoMsg->header.stamp = mUsePubTimestamps ? get_clock()->now() : t;
     depthInfoMsg->header.frame_id = mDepthOptFrameId;
-    depthInfoMsg->min_depth = mMinDepth;
-    depthInfoMsg->max_depth = mMaxDepth;
+    depthInfoMsg->min_depth = mMinDepth[mPubBufIdx];
+    depthInfoMsg->max_depth = mMaxDepth[mPubBufIdx];
 
     DEBUG_STREAM_VD(" * Publishing DEPTH INFO message");
     try {
@@ -2958,27 +2934,21 @@ void ZedCamera::threadFunc_videoDepthElab()
 
   setupVideoDepthThread();
 
-  mVdDataReady = false;
-  std::unique_lock<std::mutex> lock(mVdMutex);
+  while (!mThreadStop) {
+    // Wait for mGrabVdSignal to continue
+    std::unique_lock<std::mutex> pipeline_lock(mPipelineMutex);
+    mCvGrab.wait(pipeline_lock, [this]{ return mGrabVdSignal; });
+    mGrabVdSignal = false;
+    pipeline_lock.unlock();
 
-  while (1) {
-    if (!rclcpp::ok()) {
-      DEBUG_VD(" * [threadFunc_videoDepthElab] Ctrl+C received: stopping video depth thread");
-      break;
-    }
-    if (mThreadStop) {
-      DEBUG_VD(
-        " * [threadFunc_videoDepthElab] Video/Depth thread stopped");
-      break;
-    }
-
-    if (!waitForVideoDepthData(lock)) {
-      break;
-    }
-
+    mPubBufIdx ^= 1;
     handleVideoDepthPublishing();
 
-    mVdDataReady = false;
+    // Notify with mPublishVdSignal
+    pipeline_lock.lock();
+    mPublishVdSignal = true;
+    mCvPub.notify_all();
+    pipeline_lock.unlock(); // technically not needed due to RAII but here for clarity
   }
 
   DEBUG_STREAM_VD("Video/Depth thread finished");
@@ -3052,33 +3022,33 @@ void ZedCamera::setupVideoDepthThread()
 }
 
 // Helper: Wait for video/depth data or thread stop
-bool ZedCamera::waitForVideoDepthData(std::unique_lock<std::mutex> & lock)
-{
-  while (!mVdDataReady) { // loop to avoid spurious wakeups
-    if (mVdDataReadyCondVar.wait_for(lock, std::chrono::milliseconds(500)) ==
-      std::cv_status::timeout)
-    {
-      // Check thread stopping
-      if (!rclcpp::ok()) {
-        DEBUG_VD("[waitForVideoDepthData] Ctrl+C received: stopping video/depth thread");
-        mThreadStop = true;
-        return false;
-      }
-      if (mThreadStop) {
-        DEBUG_VD(
-          "[waitForVideoDepthData] Video/Depth thread stopped");
-        return false;
-      }
+// bool ZedCamera::waitForVideoDepthData(std::unique_lock<std::mutex> & lock)
+// {
+//   while (!mVdDataReady) { // loop to avoid spurious wakeups
+//     if (mVdDataReadyCondVar.wait_for(lock, std::chrono::milliseconds(500)) ==
+//       std::cv_status::timeout)
+//     {
+//       // Check thread stopping
+//       if (!rclcpp::ok()) {
+//         DEBUG_VD("[waitForVideoDepthData] Ctrl+C received: stopping video/depth thread");
+//         mThreadStop = true;
+//         return false;
+//       }
+//       if (mThreadStop) {
+//         DEBUG_VD(
+//           "[waitForVideoDepthData] Video/Depth thread stopped");
+//         return false;
+//       }
 
-      DEBUG_VD(" * [waitForVideoDepthData] Waiting for Video/Depth data");
-    }
-  }
-  DEBUG_VD(" * [waitForVideoDepthData] Video/Depth data ready to be published");
-  DEBUG_STREAM_VD(
-    " * [waitForVideoDepthData] mVdMutex: " <<
-      (lock.owns_lock() ? "Locked" : "Unlocked"));
-  return true;
-}
+//       DEBUG_VD(" * [waitForVideoDepthData] Waiting for Video/Depth data");
+//     }
+//   }
+//   DEBUG_VD(" * [waitForVideoDepthData] Video/Depth data ready to be published");
+//   DEBUG_STREAM_VD(
+//     " * [waitForVideoDepthData] mVdMutex: " <<
+//       (lock.owns_lock() ? "Locked" : "Unlocked"));
+//   return true;
+// }
 
 // Helper: Handle publishing and frequency control
 void ZedCamera::handleVideoDepthPublishing()
@@ -3095,23 +3065,6 @@ void ZedCamera::handleVideoDepthPublishing()
     }
   }
   // <---- Publish sync sensors data if needed
-
-  // ----> Check publishing frequency
-  double vd_period_usec = 1e6 / mVdPubRate;
-  double elapsed_usec = mVdPubFreqTimer.toc() * 1e6;
-
-  DEBUG_STREAM_VD(" * [handleVideoDepthPublishing] elapsed_usec " << elapsed_usec);
-
-  int wait_usec = 100;
-  if (elapsed_usec < vd_period_usec) {
-    wait_usec = static_cast<int>(vd_period_usec - elapsed_usec);
-    rclcpp::sleep_for(std::chrono::microseconds(wait_usec));
-    DEBUG_STREAM_VD(" * [handleVideoDepthPublishing] wait_usec " << wait_usec);
-  }
-  DEBUG_STREAM_VD(" * [handleVideoDepthPublishing] sleeped for " << wait_usec << " µsec");
-
-  mVdPubFreqTimer.tic();
-  // <---- Check publishing frequency
 }
 
 void ZedCamera::publishCameraInfos()

@@ -15,6 +15,7 @@
 #ifndef ZED_CAMERA_COMPONENT_HPP_
 #define ZED_CAMERA_COMPONENT_HPP_
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <sl/Camera.hpp>
@@ -975,8 +976,9 @@ private:
   // <---- Publishers
 
   // <---- Publisher variables
-  sl::Timestamp mSdkGrabTS = 0;
-  sl::Timestamp mSdkDepthGrabTS = 0;
+  std::array<sl::Timestamp, 2> mSdkGrabTS{};
+  std::array<sl::Timestamp, 2> mSdkDepthGrabTS{};
+  sl::Timestamp mSdkLastPublishTS = 0;
   sl::Timestamp mSdkLastDepthPublishTS = 0;
   size_t mRgbSubCount = 0;
   size_t mRgbRawSubCount = 0;
@@ -1003,14 +1005,14 @@ private:
   std::chrono::steady_clock::time_point mLastPosTrackingSubCountQuery;
   bool mPosTrackingSubCountInit = false;
 
-  sl::Mat mMatLeft, mMatLeftRaw;
-  sl::Mat mMatRight, mMatRightRaw;
-  sl::Mat mMatLeftGray, mMatLeftRawGray;
-  sl::Mat mMatRightGray, mMatRightRawGray;
-  sl::Mat mMatDepth, mMatDisp, mMatConf;
+  std::array<sl::Mat, 2> mMatLeft, mMatLeftRaw;
+  std::array<sl::Mat, 2> mMatRight, mMatRightRaw;
+  std::array<sl::Mat, 2> mMatLeftGray, mMatLeftRawGray;
+  std::array<sl::Mat, 2> mMatRightGray, mMatRightRawGray;
+  std::array<sl::Mat, 2> mMatDepth, mMatDisp, mMatConf;
 
-  float mMinDepth = 0.0f;
-  float mMaxDepth = 0.0f;
+  std::array<float, 2> mMinDepth{};
+  std::array<float, 2> mMaxDepth{};
   // <---- Publisher variables
 
   // ----> Point cloud variables
@@ -1060,6 +1062,14 @@ private:
   std::mutex mVdMutex;
   std::condition_variable mVdDataReadyCondVar;
   std::atomic_bool mVdDataReady;
+  std::mutex mPipelineMutex;
+  std::condition_variable mCvPub;
+  std::condition_variable mCvGrab;
+  // Initial values are important here
+  bool mPublishVdSignal = true;
+  bool mGrabVdSignal = false;
+  int mGrabBufIdx = 0;
+  int mPubBufIdx = 0;
   // <---- Thread Sync
 
   // ----> Status Flags
@@ -1071,7 +1081,7 @@ private:
   bool mPosTrackingStarted = false;
   std::atomic_bool mPoseLocked = false;
   std::atomic<uint64_t> mPoseLockCount{0};
-  bool mVdPublishing = false;  // Indicates if video and depth data are
+  bool mVdPublishing = true;  // Indicates if video and depth data are
                                // subscribed and then published
   bool mPcPublishing =
     false;    // Indicates if point cloud data are subscribed and then published

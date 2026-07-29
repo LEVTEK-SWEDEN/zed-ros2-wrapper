@@ -2880,7 +2880,8 @@ bool ZedCamera::startCamera()
   }
 
   mInitParams.camera_disable_self_calib = !mCameraSelfCalib;
-  mInitParams.enable_image_enhancement = true;
+  // EMILIS testing
+  mInitParams.enable_image_enhancement = false;
   mInitParams.enable_right_side_measure = false;
 
   mInitParams.async_grab_camera_recovery =
@@ -3862,13 +3863,13 @@ void ZedCamera::initThreads()
   if (!mSensCameraSync && !sl_tools::isZED(mCamRealModel))
     mSensThread = std::thread(&ZedCamera::threadFunc_pubSensorsData, this);
 
-  mVdDataReady = false;
   mVdThread = std::thread(&ZedCamera::threadFunc_videoDepthElab, this);
 
-  if (!isDepthDisabled()) {
-    mPcDataReady = false;
-    mPcThread = std::thread(&ZedCamera::threadFunc_pointcloudElab, this);
-  }
+  // EMILIS: disable pc pub thread *temporarily*
+  // if (!isDepthDisabled()) {
+  //   mPcDataReady = false;
+  //   mPcThread = std::thread(&ZedCamera::threadFunc_pointcloudElab, this);
+  // }
 
   mGrabThread = std::thread(&ZedCamera::threadFunc_zedGrab, this);
 }
@@ -5104,18 +5105,24 @@ void ZedCamera::threadFunc_zedGrab()
       }
       // <---- Params Debug info
 
+      // Update double buffer index before grab attempt
+      mGrabBufIdx ^= 1;
+
       // ----> Safe grab
+      sl_tools::StopWatch justGrabTimer(get_clock());
       {
         std::lock_guard<std::mutex> grab_lock(mGrabMutex);
         if (isDepthRequired() || isPosTrackingRequired()) {
           DEBUG_STREAM_GRAB("Grab thread: grabbing...");
           mGrabStatus = mZed->grab(mRunParams);  // Process the full pipeline with depth
+          RCLCPP_WARN_STREAM(get_logger(), "DEPTH GRAB time:  " << justGrabTimer.toc() << "s");
 
         } else {
           DEBUG_GRAB("Grab thread: reading...");
           mRunParams.enable_depth = false;
           mGrabStatus = mZed->grab(mRunParams);
           mRunParams.enable_depth = true;
+          RCLCPP_WARN_STREAM(get_logger(), "NORMAL GRAB time: " << justGrabTimer.toc() << "s");
         }
       }
       // <---- Safe grab
@@ -5323,7 +5330,8 @@ void ZedCamera::threadFunc_zedGrab()
       if (shouldRunDepthPipeline()) {
         // ----> Retrieve the point cloud if someone has subscribed to
         DEBUG_STREAM_GRAB("Grab thread: retrieving Point Cloud data");
-        processPointCloud();
+        // EMILIS: temporarily remove pointcloud
+        // processPointCloud();
         // <---- Retrieve the point cloud if someone has subscribed to
       }
 
@@ -5428,8 +5436,18 @@ void ZedCamera::threadFunc_zedGrab()
                            << effective_grab_period << " sec");
     }
 
+    // Thread sync
+    // Wait for mPublishVdSignal to continue
+    std::unique_lock<std::mutex> pipeline_lock(mPipelineMutex);
+    mCvPub.wait(pipeline_lock, [this]{ return mPublishVdSignal; });
+    mPublishVdSignal = false;
+    // Notify with mGrabVdSignal
+    mGrabVdSignal = true;
+    mCvGrab.notify_all();
+    pipeline_lock.unlock();
     DEBUG_STREAM_GRAB("Grab thread: iteration completed");
   }
+
 
   // Stop the heartbeat
   mHeartbeatTimer->cancel();
