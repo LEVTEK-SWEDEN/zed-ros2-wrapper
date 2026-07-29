@@ -112,15 +112,13 @@ ZedCameraOne::ZedCameraOne(const rclcpp::NodeOptions & options)
 ZedCameraOne::~ZedCameraOne()
 {
   deInitNode();
-  
   DEBUG_STREAM_COMM(
     "ZED Component destroyed:" << this->get_fully_qualified_name());
 }
 
 void ZedCameraOne::deInitNode()
 {
-  if (_nodeDeinitialized) return;
-  _nodeDeinitialized = true;
+  if (_nodeDeinitialized.exchange(true)) return;
 
   DEBUG_STREAM_SENS("Stopping temperatures timer");
   if (_tempPubTimer) {
@@ -853,14 +851,13 @@ void ZedCameraOne::publishCamOpened()
   std::string status_root = _topicRoot + "status/";
   std::string open_topic = status_root + "open";
 
-  _pubOpenStatus = create_publisher<std_msgs::msg::UInt32MultiArray>(
+  _pubOpenStatus = create_publisher<std_msgs::msg::UInt32>(
     open_topic, _qos, _pubOpt);
    RCLCPP_INFO_STREAM(get_logger(),
       "  * Advertised on topic: " << _pubOpenStatus->get_topic_name());
 
-  auto msg = std_msgs::msg::UInt32MultiArray();
-  msg.data.push_back(static_cast<uint32_t>(_camId));
-  msg.data.push_back(0); // 0 = success
+  auto msg = std_msgs::msg::UInt32();
+  msg.data = static_cast<uint32_t>(_camId);
   _pubOpenStatus->publish(std::move(msg));
 }
 
@@ -873,7 +870,6 @@ bool ZedCameraOne::startCamera()
   setupTf2();
   configureZedInput();
   setZedInitParams();
-  
   if (!openZedCamera()) {
     return false;
   }

@@ -350,8 +350,7 @@ private:
 
   // Heartbeat Status publisher
   heartbeatStatusPub _pubHeartbeatStatus;
-  
-  // Open Status publisher
+
   openStatusPub _pubOpenStatus;
   // <---- Publishers
 

@@ -47,7 +47,7 @@
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <sensor_msgs/msg/temperature.hpp>
 #include <std_msgs/msg/bool.hpp>
-#include <std_msgs/msg/u_int32_multi_array.hpp>
+#include <std_msgs/msg/u_int32.hpp>
 #include <std_srvs/srv/set_bool.hpp>
 #include <std_srvs/srv/trigger.hpp>
 #include <zed_msgs/srv/set_svo_frame.hpp>
@@ -125,7 +125,7 @@ typedef rclcpp::Publisher<rosgraph_msgs::msg::Clock>::SharedPtr clockPub;
 typedef rclcpp::Publisher<zed_msgs::msg::SvoStatus>::SharedPtr svoStatusPub;
 typedef rclcpp::Publisher<zed_msgs::msg::HealthStatusStamped>::SharedPtr healthStatusPub;
 typedef rclcpp::Publisher<zed_msgs::msg::Heartbeat>::SharedPtr heartbeatStatusPub;
-typedef rclcpp::Publisher<std_msgs::msg::UInt32MultiArray>::SharedPtr openStatusPub;
+typedef rclcpp::Publisher<std_msgs::msg::UInt32>::SharedPtr openStatusPub;
 
 typedef rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr imagePub;
 typedef rclcpp::Publisher<stereo_msgs::msg::DisparityImage>::SharedPtr disparityPub;

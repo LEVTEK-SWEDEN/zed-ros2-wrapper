@@ -233,8 +233,9 @@ void ZedCamera::initNode()
 
 void ZedCamera::deInitNode()
 {
-  if (mNodeDeinitialized) { return; }
-  mNodeDeinitialized = true;
+  if (mNodeDeinitialized.exchange(true)) { 
+    return;
+  }
 
   DEBUG_COMM("De-initializing ZED Component");
 
@@ -2717,14 +2718,13 @@ void ZedCamera::publishCamOpened()
   std::string status_root = mTopicRoot + "status/";
   std::string open_topic = status_root + "open";
 
-  mPubOpenStatus = create_publisher<std_msgs::msg::UInt32MultiArray>(
+  mPubOpenStatus = create_publisher<std_msgs::msg::UInt32>(
     open_topic, mQos, mPubOpt);
    RCLCPP_INFO_STREAM(get_logger(),
       "  * Advertised on topic: " << mPubOpenStatus->get_topic_name());
 
-  auto msg = std_msgs::msg::UInt32MultiArray();
-  msg.data.push_back(static_cast<uint32_t>(mCamId));
-  msg.data.push_back(0); // 0 = success
+  auto msg = std_msgs::msg::UInt32();
+  msg.data = static_cast<uint32_t>(mCamId);
   mPubOpenStatus->publish(std::move(msg));
 }
 
