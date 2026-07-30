@@ -118,6 +118,8 @@ ZedCameraOne::~ZedCameraOne()
 
 void ZedCameraOne::deInitNode()
 {
+  if (_nodeDeinitialized.exchange(true)) return;
+
   DEBUG_STREAM_SENS("Stopping temperatures timer");
   if (_tempPubTimer) {
     _tempPubTimer->cancel();
@@ -844,6 +846,21 @@ void ZedCameraOne::initServices()
   }
 }
 
+void ZedCameraOne::publishCamOpened()
+{
+  std::string status_root = _topicRoot + "status/";
+  std::string open_topic = status_root + "open";
+
+  _pubOpenStatus = create_publisher<std_msgs::msg::UInt32>(
+    open_topic, _qos, _pubOpt);
+   RCLCPP_INFO_STREAM(get_logger(),
+      "  * Advertised on topic: " << _pubOpenStatus->get_topic_name());
+
+  auto msg = std_msgs::msg::UInt32();
+  msg.data = static_cast<uint32_t>(_camId);
+  _pubOpenStatus->publish(std::move(msg));
+}
+
 bool ZedCameraOne::startCamera()
 {
   RCLCPP_INFO(get_logger(), "=== STARTING CAMERA ===");
@@ -853,12 +870,13 @@ bool ZedCameraOne::startCamera()
   setupTf2();
   configureZedInput();
   setZedInitParams();
-
   if (!openZedCamera()) {
     return false;
   }
 
   _uptimer.tic();
+  
+  publishCamOpened();
 
   // ----> Set SVO first frame if required
   if (_svoMode && _svoFrameStart != 0) {

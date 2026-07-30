@@ -77,7 +77,7 @@ protected:
   void setTFCoordFrameNames();
   void initPublishers();
   void initVideoDepthPublishers();
-
+  void publishCamOpened();
   void initSubscribers();
 
   void fillCamInfo(
@@ -943,6 +943,7 @@ private:
   svoStatusPub mPubSvoStatus;
   healthStatusPub mPubHealthStatus;
   heartbeatStatusPub mPubHeartbeatStatus;
+  openStatusPub mPubOpenStatus;
   disparityPub mPubDisparity;
   posePub mPubPose;
   poseStatusPub mPubPoseStatus;

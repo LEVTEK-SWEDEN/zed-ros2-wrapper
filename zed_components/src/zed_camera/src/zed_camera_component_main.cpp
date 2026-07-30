@@ -233,10 +233,9 @@ void ZedCamera::initNode()
 
 void ZedCamera::deInitNode()
 {
-  if (mNodeDeinitialized) {
+  if (mNodeDeinitialized.exchange(true)) { 
     return;
   }
-  mNodeDeinitialized = true;
 
   DEBUG_COMM("De-initializing ZED Component");
 
@@ -2696,6 +2695,21 @@ void ZedCamera::initSubscribers()
   }
 }
 
+void ZedCamera::publishCamOpened()
+{
+  std::string status_root = mTopicRoot + "status/";
+  std::string open_topic = status_root + "open";
+
+  mPubOpenStatus = create_publisher<std_msgs::msg::UInt32>(
+    open_topic, mQos, mPubOpt);
+   RCLCPP_INFO_STREAM(get_logger(),
+      "  * Advertised on topic: " << mPubOpenStatus->get_topic_name());
+
+  auto msg = std_msgs::msg::UInt32();
+  msg.data = static_cast<uint32_t>(mCamId);
+  mPubOpenStatus->publish(std::move(msg));
+}
+
 bool ZedCamera::startCamera()
 {
   RCLCPP_INFO(get_logger(), "=== STARTING CAMERA ===");
@@ -3012,7 +3026,9 @@ bool ZedCamera::startCamera()
 
     rclcpp::sleep_for(std::chrono::seconds(mCamTimeoutSec));
   }
-  // ----> Try to connect to a camera, to a stream, or to load an SVO
+  // <---- Try to connect to a camera, to a stream, or to load an SVO
+
+  publishCamOpened();
 
   // ----> Set SVO first frame if required
   if (mSvoMode && mSvoFrameStart != 0) {
