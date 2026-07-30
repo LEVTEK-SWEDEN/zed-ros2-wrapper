@@ -77,7 +77,7 @@ protected:
   void setTFCoordFrameNames();
   void initPublishers();
   void initVideoDepthPublishers();
-
+  void publishCamOpened();
   void initSubscribers();
 
   void fillCamInfo(
@@ -970,6 +970,7 @@ private:
   healthStatusPub mPubHealthStatus;
   heartbeatStatusPub mPubHeartbeatStatus;
 
+  openStatusPub mPubOpenStatus;
   disparityPub mPubDisparity; // Obsolete
   disparityPub mPubDispMap; // Disparity Map
   image_transport::Publisher mPubDispImg; // Disparity Image

@@ -82,6 +82,7 @@ protected:
   void configureZedInput();
   void setZedInitParams();
   bool openZedCamera();
+  void publishCamOpened();
   void processCameraInformation();
   void setupCameraInfoMessages();
 
@@ -254,6 +255,7 @@ private:
   std::thread _grabThread;        // Main grab thread
   std::thread _sensThread;        // Sensors data publish thread
 
+  std::atomic<bool> _nodeDeinitialized = false;
   std::atomic<bool> _threadStop;
   rclcpp::TimerBase::SharedPtr _initTimer;
   rclcpp::TimerBase::SharedPtr _tempPubTimer;    // Timer to retrieve and publish camera temperature
@@ -347,6 +349,8 @@ private:
 
   // Heartbeat Status publisher
   heartbeatStatusPub _pubHeartbeatStatus;
+
+  openStatusPub _pubOpenStatus;
   // <---- Publishers
 
   // ----> Publisher variables

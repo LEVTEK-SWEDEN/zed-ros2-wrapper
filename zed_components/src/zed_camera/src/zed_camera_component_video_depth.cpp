@@ -3526,6 +3526,7 @@ bool ZedCamera::handleDepthParams(
       RCLCPP_WARN_STREAM(get_logger(), result.reason);
       return true;
     }
+
     double val = param.as_double();
     if (val < -1.0 || val > mCamGrabFrameRate) {
       result.successful = false;
