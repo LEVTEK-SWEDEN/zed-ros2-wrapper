@@ -5115,14 +5115,12 @@ void ZedCamera::threadFunc_zedGrab()
         if (isDepthRequired() || isPosTrackingRequired()) {
           DEBUG_STREAM_GRAB("Grab thread: grabbing...");
           mGrabStatus = mZed->grab(mRunParams);  // Process the full pipeline with depth
-          RCLCPP_WARN_STREAM(get_logger(), "DEPTH GRAB time:  " << justGrabTimer.toc() << "s");
 
         } else {
           DEBUG_GRAB("Grab thread: reading...");
           mRunParams.enable_depth = false;
           mGrabStatus = mZed->grab(mRunParams);
           mRunParams.enable_depth = true;
-          RCLCPP_WARN_STREAM(get_logger(), "NORMAL GRAB time: " << justGrabTimer.toc() << "s");
         }
       }
       // <---- Safe grab
