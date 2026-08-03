@@ -89,6 +89,8 @@ ZedCamera::ZedCamera(const rclcpp::NodeOptions & options)
   mDepthRateTimer(get_clock()),
   mPublishFreqTimer(get_clock()),
   mDepthPublishFreqTimer(get_clock()),
+  mShouldGrabTimer(get_clock()),
+  mShouldProcPointCloudTimer(get_clock()),
   mFrameTimestamp(TIMEZERO_ROS), 
   mGnssTimestamp(TIMEZERO_ROS),  
   mLastTs_imu(TIMEZERO_ROS),
@@ -2880,8 +2882,7 @@ bool ZedCamera::startCamera()
   }
 
   mInitParams.camera_disable_self_calib = !mCameraSelfCalib;
-  // EMILIS testing
-  mInitParams.enable_image_enhancement = false;
+  mInitParams.enable_image_enhancement = true;
   mInitParams.enable_right_side_measure = false;
 
   mInitParams.async_grab_camera_recovery =
@@ -3865,11 +3866,10 @@ void ZedCamera::initThreads()
 
   mVdThread = std::thread(&ZedCamera::threadFunc_videoDepthElab, this);
 
-  // EMILIS: disable pc pub thread *temporarily*
-  // if (!isDepthDisabled()) {
-  //   mPcDataReady = false;
-  //   mPcThread = std::thread(&ZedCamera::threadFunc_pointcloudElab, this);
-  // }
+  if (!isDepthDisabled()) {
+    mPcDataReady = false;
+    mPcThread = std::thread(&ZedCamera::threadFunc_pointcloudElab, this);
+  }
 
   mGrabThread = std::thread(&ZedCamera::threadFunc_zedGrab, this);
 }
@@ -4956,6 +4956,22 @@ void ZedCamera::threadFunc_zedGrab()
       }
       // <---- Interruption check
 
+      if (!shouldGrabThisFrame()) {
+        // If publishing rate is set to be less than camera fps, then we should not grab a frame
+        // all the time. The sleep is to avoid the first part of the while loop from running over
+        // and over while we wait for the publish rate timer to say we should grab the frame.
+        double sleep_time = 1e6 / (4.0 * mVdPubRate);
+        int sleep_time_usec = static_cast<int>(sleep_time);
+        rclcpp::sleep_for(std::chrono::microseconds(sleep_time_usec));
+        continue;
+      }
+      // If we are going to grab this frame, also check if depth rate timer says it's time to grab
+      // a depth frame.
+      updateDepthRateDisabling(); 
+      bool do_point_cloud_processing = false;
+      if (shouldGrabDepthThisFrame())
+        do_point_cloud_processing = shouldProcessPointCloudThisFrame();
+
       if (mSvoMode && mSvoPause) {
         if (!mGrabOnce) {
           rclcpp::sleep_for(100ms);
@@ -4982,10 +4998,6 @@ void ZedCamera::threadFunc_zedGrab()
       }
 
       sl_tools::StopWatch grabElabTimer(get_clock());
-
-      // Update the boolean mDepthDisabledByRate based on the depth.depth_freq parameter.
-      // This will toggle whether or not we grab a frame from the camera with depth data or not.
-      updateDepthRateDisabling();
 
       // ----> Apply depth settings
       DEBUG_STREAM_GRAB("Grab thread: applying depth settings");
@@ -5109,10 +5121,9 @@ void ZedCamera::threadFunc_zedGrab()
       mGrabBufIdx ^= 1;
 
       // ----> Safe grab
-      sl_tools::StopWatch justGrabTimer(get_clock());
       {
         std::lock_guard<std::mutex> grab_lock(mGrabMutex);
-        if (isDepthRequired() || isPosTrackingRequired()) {
+        if (isDepthRequired()) {
           DEBUG_STREAM_GRAB("Grab thread: grabbing...");
           mGrabStatus = mZed->grab(mRunParams);  // Process the full pipeline with depth
 
@@ -5325,19 +5336,20 @@ void ZedCamera::threadFunc_zedGrab()
       processVideoDepth();
       // <---- Retrieve Image/Depth data if someone has subscribed to
 
-      if (shouldRunDepthPipeline()) {
+      if (shouldGrabDepthThisFrame()) {
         // ----> Retrieve the point cloud if someone has subscribed to
-        DEBUG_STREAM_GRAB("Grab thread: retrieving Point Cloud data");
-        // EMILIS: temporarily remove pointcloud
-        // processPointCloud();
+        if (do_point_cloud_processing) {
+          DEBUG_STREAM_GRAB("Grab thread: retrieving Point Cloud data");
+          processPointCloud();
+        }
         // <---- Retrieve the point cloud if someone has subscribed to
       }
 
 #if (ZED_SDK_MAJOR_VERSION * 10 + ZED_SDK_MINOR_VERSION) >= 52
       // With ZED SDK v5.2 we can use `GEN_3` even if depth is disabled
-      if (shouldRunDepthPipeline() || mPosTrkMode == sl::POSITIONAL_TRACKING_MODE::GEN_3) {
+      if (shouldGrabDepthThisFrame() || mPosTrkMode == sl::POSITIONAL_TRACKING_MODE::GEN_3) {
 #else
-      if (shouldRunDepthPipeline()) {
+      if (shouldGrabDepthThisFrame()) {
 #endif
         // ----> Localization processing
         DEBUG_STREAM_GRAB("Grab thread: Localization processing");
@@ -5382,7 +5394,7 @@ void ZedCamera::threadFunc_zedGrab()
         // <---- Localization processing
       }
 
-      if (shouldRunDepthPipeline()) {
+      if (shouldGrabDepthThisFrame()) {
         DEBUG_STREAM_GRAB("Grab thread: Object Detection processing");
         {
           std::lock_guard<std::mutex> lock(mObjDetMutex);
@@ -5437,10 +5449,12 @@ void ZedCamera::threadFunc_zedGrab()
     // Thread sync
     // Wait for mPublishVdSignal to continue
     std::unique_lock<std::mutex> pipeline_lock(mPipelineMutex);
-    mCvPub.wait(pipeline_lock, [this]{ return mPublishVdSignal; });
+    mCvPub.wait(pipeline_lock, [this]{ return mPublishVdSignal && mPublishPcSignal; });
     mPublishVdSignal = false;
-    // Notify with mGrabVdSignal
+    mPublishPcSignal = false;
+    // Notify the video/depth and point cloud publishing threads
     mGrabVdSignal = true;
+    mGrabPcSignal = true;
     mCvGrab.notify_all();
     pipeline_lock.unlock();
     DEBUG_STREAM_GRAB("Grab thread: iteration completed");
@@ -6900,11 +6914,11 @@ void ZedCamera::publishPoseLandmarks()
         msg->header.stamp = mUsePubTimestamps ? get_clock()->now() : mFrameTimestamp;
       } else {
         msg->header.stamp = mUsePubTimestamps ? get_clock()->now() : sl_tools::slTime2Ros(
-          mMatCloud.timestamp);
+          mMatCloud[mGrabBufIdx].timestamp);
       }
     } else {
       msg->header.stamp = mUsePubTimestamps ? get_clock()->now() : sl_tools::slTime2Ros(
-        mMatCloud.timestamp);
+        mMatCloud[mGrabBufIdx].timestamp);
     }
 
     msg->header.frame_id = mMapFrameId;      // Set the header values of the ROS message
@@ -7475,9 +7489,9 @@ bool ZedCamera::isPosTrackingRequired()
 #if (ZED_SDK_MAJOR_VERSION * 10 + ZED_SDK_MINOR_VERSION) >= 52
   // With ZED SDK v5.2 we can use Positional Tracking `GEN_3` even if depth is
   // disabled
-  if (!shouldRunDepthPipeline() && mPosTrkMode != sl::POSITIONAL_TRACKING_MODE::GEN_3) {
+  if (isDepthDisabled() && mPosTrkMode != sl::POSITIONAL_TRACKING_MODE::GEN_3) {
 #else
-  if (!shouldRunDepthPipeline()) {
+  if (isDepthDisabled()) {
 #endif
     return false;
   }
@@ -8756,7 +8770,7 @@ void ZedCamera::callback_updateDiagnostic(
     bool should_publish_depth_diagnostics = 
       !mDepthDisabledByService
       && mDepthMode != sl::DEPTH_MODE::NONE
-      && mDepthRate != 0.0;
+      && mDepthRate >= 0.0;
 
     if (mVdPublishing) {
       if (mSvoMode && !mSvoRealtime) {
@@ -8804,18 +8818,14 @@ void ZedCamera::callback_updateDiagnostic(
       stat.add("Depth status", "ACTIVE");
       stat.add("Depth mode", sl::toString(mDepthMode).c_str());
 
-      if (mPcPublishing) {
-        freq = 1. / mPcPeriodMean_sec->getAvg();
-        freq_perc = 100. * freq / mPcPubRate;
-        stat.addf(
-          "Point Cloud", "Mean Frequency: %.1f Hz (%.1f%%)", freq,
-          freq_perc);
-        stat.addf(
-          "Point Cloud", "Processing Time: %.3f sec (Max. %.3f sec)",
-          mPcProcMean_sec->getAvg(), 1. / mPcPubRate);
-      } else {
-        stat.add("Point Cloud", "Topic not subscribed");
-      }
+      freq = 1. / mPcPeriodMean_sec->getAvg();
+      freq_perc = 100. * freq / mPcPubRate;
+      stat.addf(
+        "Point Cloud", "Mean Frequency: %.1f Hz (%.1f%%)", freq,
+        freq_perc);
+      stat.addf(
+        "Point Cloud", "Processing Time: %.3f sec (Max. %.3f sec)",
+        mPcProcMean_sec->getAvg(), 1. / mPcPubRate);
 
       if (mFloorAlignment) {
         if (mPosTrackingStatus.spatial_memory_status == sl::SPATIAL_MEMORY_STATUS::SEARCHING) {

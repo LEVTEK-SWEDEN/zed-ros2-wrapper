@@ -343,9 +343,11 @@ protected:
 
   // ----> Utility functions
   bool isDepthDisabled() { return mDepthDisabledByService || (mDepthMode == sl::DEPTH_MODE::NONE);}
-  bool shouldRunDepthPipeline() { return !mDepthDisabledByRate && !isDepthDisabled(); }
+  bool shouldGrabDepthThisFrame() { return !mDepthDisabledByRate && !isDepthDisabled(); }
   bool isDepthRequired();
+  bool shouldGrabThisFrame();
   void updateDepthRateDisabling();
+  bool shouldProcessPointCloudThisFrame();
   bool updatePosTrackingSubscribers(bool force = false);
   bool isPosTrackingRequired();
 
@@ -709,6 +711,7 @@ private:
   OnSetParametersCallbackHandle::SharedPtr mParamChangeCallbackHandle;
 
   double mVdPubRate = 15.0;
+  double mShouldGrabTimerCarry = 0.0;
   int mCamBrightness = 4;
   int mCamContrast = 4;
   int mCamHue = 0;
@@ -723,6 +726,7 @@ private:
   int mDepthConf = 95;
   int mDepthTextConf = 100;
   double mPcPubRate = 10.0;
+  double mShouldProcPointCloudTimerCarry = 0.0;
   double mFusedPcPubRate = 1.0;
   bool mRemoveSatAreas = true;
 
@@ -978,8 +982,10 @@ private:
   // <---- Publisher variables
   std::array<sl::Timestamp, 2> mSdkGrabTS{};
   std::array<sl::Timestamp, 2> mSdkDepthGrabTS{};
+  std::array<sl::Timestamp, 2> mSdkPcGrabTS{};
   sl::Timestamp mSdkLastPublishTS = 0;
   sl::Timestamp mSdkLastDepthPublishTS = 0;
+  sl::Timestamp mSdkLastPcPublishTS = 0;
   size_t mRgbSubCount = 0;
   size_t mRgbRawSubCount = 0;
   size_t mRgbGraySubCount = 0;
@@ -1016,7 +1022,7 @@ private:
   // <---- Publisher variables
 
   // ----> Point cloud variables
-  sl::Mat mMatCloud;
+  std::array<sl::Mat, 2> mMatCloud;
   sl::FusedPointCloud mFusedPC;
   sensor_msgs::msg::PointCloud2 mPcMsg;  // Reused across frames to avoid per-frame allocation
   // <---- Point cloud variables
@@ -1067,9 +1073,12 @@ private:
   std::condition_variable mCvGrab;
   // Initial values are important here
   bool mPublishVdSignal = true;
+  bool mPublishPcSignal = true;
   bool mGrabVdSignal = false;
+  bool mGrabPcSignal = false;
   int mGrabBufIdx = 0;
-  int mPubBufIdx = 0;
+  int mVdBufIdx = 0;
+  int mPcBufIdx = 0;
   // <---- Thread Sync
 
   // ----> Status Flags
@@ -1191,6 +1200,8 @@ private:
   sl_tools::StopWatch mDepthRateTimer;
   sl_tools::StopWatch mPublishFreqTimer;
   sl_tools::StopWatch mDepthPublishFreqTimer;
+  sl_tools::StopWatch mShouldGrabTimer;
+  sl_tools::StopWatch mShouldProcPointCloudTimer;
 
   int mSysOverloadCount = 0;
   // <---- Diagnostic
