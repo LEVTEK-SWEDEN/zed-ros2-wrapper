@@ -15,6 +15,7 @@
 #ifndef ZED_CAMERA_COMPONENT_HPP_
 #define ZED_CAMERA_COMPONENT_HPP_
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <sl/Camera.hpp>
@@ -342,9 +343,11 @@ protected:
 
   // ----> Utility functions
   bool isDepthDisabled() { return mDepthDisabledByService || (mDepthMode == sl::DEPTH_MODE::NONE);}
-  bool shouldRunDepthPipeline() { return !mDepthDisabledByRate && !isDepthDisabled(); }
+  bool shouldGrabDepthThisFrame() { return !mDepthDisabledByRate && !isDepthDisabled(); }
   bool isDepthRequired();
+  bool shouldGrabThisFrame();
   void updateDepthRateDisabling();
+  bool shouldProcessPointCloudThisFrame();
   bool updatePosTrackingSubscribers(bool force = false);
   bool isPosTrackingRequired();
 
@@ -708,6 +711,7 @@ private:
   OnSetParametersCallbackHandle::SharedPtr mParamChangeCallbackHandle;
 
   double mVdPubRate = 15.0;
+  double mShouldGrabTimerCarry = 0.0;
   int mCamBrightness = 4;
   int mCamContrast = 4;
   int mCamHue = 0;
@@ -722,6 +726,7 @@ private:
   int mDepthConf = 95;
   int mDepthTextConf = 100;
   double mPcPubRate = 10.0;
+  double mShouldProcPointCloudTimerCarry = 0.0;
   double mFusedPcPubRate = 1.0;
   bool mRemoveSatAreas = true;
 
@@ -975,9 +980,12 @@ private:
   // <---- Publishers
 
   // <---- Publisher variables
-  sl::Timestamp mSdkGrabTS = 0;
-  sl::Timestamp mSdkDepthGrabTS = 0;
+  std::array<sl::Timestamp, 2> mSdkGrabTS{};
+  std::array<sl::Timestamp, 2> mSdkDepthGrabTS{};
+  std::array<sl::Timestamp, 2> mSdkPcGrabTS{};
+  sl::Timestamp mSdkLastPublishTS = 0;
   sl::Timestamp mSdkLastDepthPublishTS = 0;
+  sl::Timestamp mSdkLastPcPublishTS = 0;
   size_t mRgbSubCount = 0;
   size_t mRgbRawSubCount = 0;
   size_t mRgbGraySubCount = 0;
@@ -1003,18 +1011,18 @@ private:
   std::chrono::steady_clock::time_point mLastPosTrackingSubCountQuery;
   bool mPosTrackingSubCountInit = false;
 
-  sl::Mat mMatLeft, mMatLeftRaw;
-  sl::Mat mMatRight, mMatRightRaw;
-  sl::Mat mMatLeftGray, mMatLeftRawGray;
-  sl::Mat mMatRightGray, mMatRightRawGray;
-  sl::Mat mMatDepth, mMatDisp, mMatConf;
+  std::array<sl::Mat, 2> mMatLeft, mMatLeftRaw;
+  std::array<sl::Mat, 2> mMatRight, mMatRightRaw;
+  std::array<sl::Mat, 2> mMatLeftGray, mMatLeftRawGray;
+  std::array<sl::Mat, 2> mMatRightGray, mMatRightRawGray;
+  std::array<sl::Mat, 2> mMatDepth, mMatDisp, mMatConf;
 
-  float mMinDepth = 0.0f;
-  float mMaxDepth = 0.0f;
+  std::array<float, 2> mMinDepth{};
+  std::array<float, 2> mMaxDepth{};
   // <---- Publisher variables
 
   // ----> Point cloud variables
-  sl::Mat mMatCloud;
+  std::array<sl::Mat, 2> mMatCloud;
   sl::FusedPointCloud mFusedPC;
   sensor_msgs::msg::PointCloud2 mPcMsg;  // Reused across frames to avoid per-frame allocation
   // <---- Point cloud variables
@@ -1060,6 +1068,17 @@ private:
   std::mutex mVdMutex;
   std::condition_variable mVdDataReadyCondVar;
   std::atomic_bool mVdDataReady;
+  std::mutex mPipelineMutex;
+  std::condition_variable mCvPub;
+  std::condition_variable mCvGrab;
+  // Initial values are important here
+  bool mPublishVdSignal = true;
+  bool mPublishPcSignal = true;
+  bool mGrabVdSignal = false;
+  bool mGrabPcSignal = false;
+  int mGrabBufIdx = 0;
+  int mVdBufIdx = 0;
+  int mPcBufIdx = 0;
   // <---- Thread Sync
 
   // ----> Status Flags
@@ -1071,7 +1090,7 @@ private:
   bool mPosTrackingStarted = false;
   std::atomic_bool mPoseLocked = false;
   std::atomic<uint64_t> mPoseLockCount{0};
-  bool mVdPublishing = false;  // Indicates if video and depth data are
+  bool mVdPublishing = true;  // Indicates if video and depth data are
                                // subscribed and then published
   bool mPcPublishing =
     false;    // Indicates if point cloud data are subscribed and then published
@@ -1135,11 +1154,11 @@ private:
   float mTempImu = NOT_VALID_TEMP;
   float mTempLeft = NOT_VALID_TEMP;
   float mTempRight = NOT_VALID_TEMP;
-  std::unique_ptr<sl_tools::WinAvg> mElabPeriodMean_sec;
-  std::unique_ptr<sl_tools::WinAvg> mGrabPeriodMean_sec;
-  std::unique_ptr<sl_tools::WinAvg> mVideoDepthPeriodMean_sec;
-  std::unique_ptr<sl_tools::WinAvg> mDepthPeriodMean_sec;
-  std::unique_ptr<sl_tools::WinAvg> mVideoDepthElabMean_sec;
+  std::unique_ptr<sl_tools::WinAvg> mElabPeriodMean_sec; // Grab + retrieve time
+  std::unique_ptr<sl_tools::WinAvg> mGrabPeriodMean_sec; // Time between grabs
+  std::unique_ptr<sl_tools::WinAvg> mVideoDepthPeriodMean_sec; // Time between image timestamps 
+  std::unique_ptr<sl_tools::WinAvg> mDepthPeriodMean_sec; // Time between depth image timestamps
+  std::unique_ptr<sl_tools::WinAvg> mVideoDepthElabMean_sec; // Publishing time
   std::unique_ptr<sl_tools::WinAvg> mPcPeriodMean_sec;
   std::unique_ptr<sl_tools::WinAvg> mPcProcMean_sec;
   std::unique_ptr<sl_tools::WinAvg> mImuPeriodMean_sec;
@@ -1154,6 +1173,8 @@ private:
   std::unique_ptr<sl_tools::WinAvg> mPubPoseTF_sec;
   std::unique_ptr<sl_tools::WinAvg> mPubImuTF_sec;
   std::unique_ptr<sl_tools::WinAvg> mGnssFix_sec;
+  std::unique_ptr<sl_tools::WinAvg> mPublishPeriodMean_sec; // Time between publishes
+  std::unique_ptr<sl_tools::WinAvg> mDepthPublishPeriodMean_sec; // Time between depth publishes
   bool mImuPublishing = false;
   bool mMagPublishing = false;
   bool mBaroPublishing = false;
@@ -1177,6 +1198,10 @@ private:
   sl_tools::StopWatch mPcFreqTimer;
   sl_tools::StopWatch mGnssFixFreqTimer;
   sl_tools::StopWatch mDepthRateTimer;
+  sl_tools::StopWatch mPublishFreqTimer;
+  sl_tools::StopWatch mDepthPublishFreqTimer;
+  sl_tools::StopWatch mShouldGrabTimer;
+  sl_tools::StopWatch mShouldProcPointCloudTimer;
 
   int mSysOverloadCount = 0;
   // <---- Diagnostic
