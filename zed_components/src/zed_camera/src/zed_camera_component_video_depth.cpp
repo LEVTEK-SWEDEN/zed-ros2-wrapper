@@ -1968,12 +1968,13 @@ void ZedCamera::publishVideoDepth(rclcpp::Time & out_pub_ts)
 {
   DEBUG_VD("=== Publish Video and Depth topics === ");
 
-  rclcpp::Time timeStamp; // default constructed -> is zero nanoseconds
   if (!(mSdkLastPublishTS < mSdkGrabTS[mVdBufIdx])) return;
+  mSdkLastPublishTS = mSdkGrabTS[mVdBufIdx];
 
   sl_tools::StopWatch vdElabTimer(get_clock());
 
-  mSdkLastPublishTS = mSdkGrabTS[mVdBufIdx];
+  rclcpp::Time timeStamp = sl_tools::slTime2Ros(mSdkGrabTS[mVdBufIdx]);
+
   publishLeftAndRgbImages(timeStamp);
   publishLeftRawAndRgbRawImages(timeStamp);
   publishLeftGrayAndRgbGrayImages(timeStamp);
@@ -1997,8 +1998,6 @@ void ZedCamera::publishVideoDepth(rclcpp::Time & out_pub_ts)
  }
 
   mVideoDepthElabMean_sec->addValue(vdElabTimer.toc());
-
-  out_pub_ts = timeStamp; // This variable is never used? Why is it here?
 
   mPublishPeriodMean_sec->addValue(mPublishFreqTimer.toc());
   mPublishFreqTimer.tic();

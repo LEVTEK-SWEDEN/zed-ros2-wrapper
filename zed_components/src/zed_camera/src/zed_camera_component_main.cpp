@@ -5460,7 +5460,6 @@ void ZedCamera::threadFunc_zedGrab()
     DEBUG_STREAM_GRAB("Grab thread: iteration completed");
   }
 
-
   // Stop the heartbeat
   mHeartbeatTimer->cancel();
 
