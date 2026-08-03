@@ -2006,94 +2006,6 @@ void ZedCamera::publishVideoDepth(rclcpp::Time & out_pub_ts)
   DEBUG_VD("=== Video and Depth topics published === ");
 }
 
-// Helper functions for publishVideoDepth
-
-// void ZedCamera::checkRgbDepthSync()
-// {
-//   sl::Timestamp ts_rgb = 0;
-//   sl::Timestamp ts_depth = 0;
-
-//   if (mRgbSubscribed && (mDepthSubCount > 0 || mDepthInfoSubCount > 0)) {
-//     ts_rgb = mMatLeft.timestamp;
-//     ts_depth = mMatDepth.timestamp;
-
-//     if (mRgbSubscribed &&
-//       (ts_rgb.data_ns != 0 && (ts_depth.data_ns != ts_rgb.data_ns)))
-//     {
-//       RCLCPP_WARN_STREAM(
-//         get_logger(),
-//         " !!!!! DEPTH/RGB ASYNC!!!! - Delta: "
-//           << 1e-9 * static_cast<int64_t>(ts_depth.data_ns - ts_rgb.data_ns) 
-//           << " sec");
-//       RCLCPP_WARN(
-//         get_logger(),
-//         " NOTE: this should never happen, please contact the node "
-//         "maintainer in case you get this warning.");
-//     }
-//   }
-// }
-
-
-// bool ZedCamera::checkGrabAndUpdateTimestamp(rclcpp::Time & out_pub_ts)
-// {
-//   if (mSdkGrabTS.getNanoseconds() == mLastTs_grab.getNanoseconds()) {
-//     out_pub_ts = TIMEZERO_ROS;
-//     DEBUG_VD(" * publishVideoDepth: ignoring not update data");
-//     DEBUG_STREAM_VD(
-//       " * Latest Ts: " << mLastTs_grab.getNanoseconds() << " - New Ts: " <<
-//         mSdkGrabTS.getNanoseconds());
-//     return false;
-//   }
-
-//   if (mSdkGrabTS.data_ns != 0) {
-//     if (!mSvoMode) {
-//       double period_sec =
-//         static_cast<double>(mSdkGrabTS.data_ns - mLastTs_grab.data_ns) / 1e9;
-//       DEBUG_STREAM_VD(
-//         " * VIDEO/DEPTH PUB LAST PERIOD: "
-//           << period_sec << " sec @" << 1. / period_sec << " Hz / Expected: " << 1. / mVdPubRate <<
-//           " sec @" << mVdPubRate <<
-//           " Hz");
-
-//       mVideoDepthPeriodMean_sec->addValue(period_sec);
-//       DEBUG_STREAM_VD(
-//         " * VIDEO/DEPTH PUB MEAN PERIOD: "
-//           << mVideoDepthPeriodMean_sec->getAvg() << " sec @"
-//           << 1. / mVideoDepthPeriodMean_sec->getAvg() << " Hz / Expected: " << 1. / mVdPubRate <<
-//           " sec @" << mVdPubRate <<
-//           " Hz");
-
-//       mLastTs_grab = mSdkGrabTS;
-//     }
-//   }
-
-//   if (mSdkDepthGrabTS.getNanoseconds() != mLastTs_depthGrab.getNanoseconds()
-//       && mSdkDepthGrabTS.data_ns != 0 
-//       && !mSvoMode) {
-//     double period_sec =
-//       static_cast<double>(mSdkDepthGrabTS.data_ns - mLastTs_depthGrab.data_ns) / 1e9;
-
-//     mDepthPeriodMean_sec->addValue(period_sec);
-//     mLastTs_depthGrab = mSdkDepthGrabTS;
-//   }
-
-//   if (mSvoMode) {
-//     out_pub_ts = mUsePubTimestamps ? get_clock()->now() : mFrameTimestamp;
-//   } else if (mSimMode) {
-//     if (mUseSimTime) {
-//       out_pub_ts = get_clock()->now();
-//     } else {
-//       out_pub_ts = mUsePubTimestamps ? get_clock()->now() :
-//         sl_tools::slTime2Ros(mZed->getTimestamp(sl::TIME_REFERENCE::IMAGE));
-//     }
-//   } else {
-//     out_pub_ts = mUsePubTimestamps ? get_clock()->now() : sl_tools::slTime2Ros(
-//       mSdkGrabTS,
-//       get_clock()->get_clock_type());
-//   }
-//   return true;
-// }
-
 void ZedCamera::publishLeftAndRgbImages(const rclcpp::Time & t)
 {
   if (mLeftSubCount > 0) {
@@ -3008,35 +2920,6 @@ void ZedCamera::setupVideoDepthThread()
     }
   }
 }
-
-// Helper: Wait for video/depth data or thread stop
-// bool ZedCamera::waitForVideoDepthData(std::unique_lock<std::mutex> & lock)
-// {
-//   while (!mVdDataReady) { // loop to avoid spurious wakeups
-//     if (mVdDataReadyCondVar.wait_for(lock, std::chrono::milliseconds(500)) ==
-//       std::cv_status::timeout)
-//     {
-//       // Check thread stopping
-//       if (!rclcpp::ok()) {
-//         DEBUG_VD("[waitForVideoDepthData] Ctrl+C received: stopping video/depth thread");
-//         mThreadStop = true;
-//         return false;
-//       }
-//       if (mThreadStop) {
-//         DEBUG_VD(
-//           "[waitForVideoDepthData] Video/Depth thread stopped");
-//         return false;
-//       }
-
-//       DEBUG_VD(" * [waitForVideoDepthData] Waiting for Video/Depth data");
-//     }
-//   }
-//   DEBUG_VD(" * [waitForVideoDepthData] Video/Depth data ready to be published");
-//   DEBUG_STREAM_VD(
-//     " * [waitForVideoDepthData] mVdMutex: " <<
-//       (lock.owns_lock() ? "Locked" : "Unlocked"));
-//   return true;
-// }
 
 // Helper: Handle publishing and frequency control
 void ZedCamera::handleVideoDepthPublishing()
