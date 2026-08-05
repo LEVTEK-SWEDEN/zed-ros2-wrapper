@@ -1248,6 +1248,8 @@ void ZedCameraOne::initThreadsAndTimers()
   // Start Heartbeat timer
   startHeartbeatTimer();
 
+  startCamIdleTimer();
+
   // ----> Start CMOS Temperatures thread
   startTempPubTimer();
   // <---- Start CMOS Temperatures thread
@@ -2741,6 +2743,32 @@ void ZedCameraOne::stopSvoRecording()
   }
 }
 
+void ZedCameraOne::callback_checkIfCamShouldIdle()
+{
+  if (!areImageTopicsSubscribed())
+    stopPipeline();
+  else
+    restartPipeline();
+}
+
+void ZedCameraOne::stopPipeline()
+{
+  if (_threadStop) return; // If pipeline already stopped do nothing
+  _threadStop = true;
+  try {
+    _grabThread.join();
+  } catch (std::system_error &e) {
+    RCLCPP_WARN_STREAM(get_logger(), "Error attempting to join grab stream: " << e.what());
+  }
+}
+
+void ZedCameraOne::restartPipeline()
+{
+  if (!_threadStop) return; // If pipeline running do nothing
+  _threadStop = false;
+  _grabThread = std::thread(&ZedCameraOne::threadFunc_zedGrab, this);
+  }
+
 void ZedCameraOne::startHeartbeatTimer()
 {
   if (_heartbeatTimer != nullptr) {
@@ -2751,6 +2779,13 @@ void ZedCameraOne::startHeartbeatTimer()
   _heartbeatTimer = create_wall_timer(
     std::chrono::duration_cast<std::chrono::milliseconds>(pubPeriod_msec),
     std::bind(&ZedCameraOne::callback_pubHeartbeat, this));
+}
+
+void ZedCameraOne::startCamIdleTimer()
+{
+  std::chrono::milliseconds period(500);
+  _camIdleTimer = create_wall_timer(std::chrono::duration_cast<std::chrono::milliseconds>(period),
+                                    std::bind(&ZedCameraOne::callback_checkIfCamShouldIdle, this));
 }
 
 }  // namespace stereolabs

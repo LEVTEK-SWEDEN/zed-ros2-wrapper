@@ -290,6 +290,9 @@ void ZedCamera::deInitNode()
     DEBUG_COMM("... temperatures timer stopped");
   }
 
+  if (mHeartbeatTimer)
+    mHeartbeatTimer->cancel();
+
   // ----> Verify that all the threads are not active
   DEBUG_COMM("Stopping running threads");
   if (!mThreadStop) {
@@ -3858,6 +3861,8 @@ void ZedCamera::initThreads()
 {
   startHeartbeatTimer();
 
+  startCamIdleTimer();
+
   if (!mSimMode && !sl_tools::isZED(mCamRealModel) && !sl_tools::isZEDM(mCamRealModel))
     startTempPubTimer();
 
@@ -3884,6 +3889,13 @@ void ZedCamera::startHeartbeatTimer()
   mHeartbeatTimer = create_wall_timer(
     std::chrono::duration_cast<std::chrono::milliseconds>(pubPeriod_msec),
     std::bind(&ZedCamera::callback_pubHeartbeat, this));
+}
+
+void ZedCamera::startCamIdleTimer()
+{
+  std::chrono::milliseconds period(500);
+  mCamIdleTimer = create_wall_timer(std::chrono::duration_cast<std::chrono::milliseconds>(period),
+                                    std::bind(&ZedCamera::callback_checkIfCamShouldIdle, this));
 }
 
 void ZedCamera::startTempPubTimer()
@@ -5459,9 +5471,6 @@ void ZedCamera::threadFunc_zedGrab()
     pipeline_lock.unlock();
     DEBUG_STREAM_GRAB("Grab thread: iteration completed");
   }
-
-  // Stop the heartbeat
-  mHeartbeatTimer->cancel();
 
   DEBUG_STREAM_COMM("Grab thread finished");
 }
@@ -10152,6 +10161,47 @@ bool ZedCamera::publishSvoStatus(uint64_t frame_ts)
     return true;
   }
   return false;
+}
+
+void ZedCamera::callback_checkIfCamShouldIdle()
+{
+  if (!isPipelineSubscribed())
+    stopPipeline();
+  else
+    restartPipeline();
+}
+
+bool ZedCamera::isPipelineSubscribed()
+{
+ for (const std::string *topic : mPipelineTopics) {
+  if (topic->empty()) continue; // empty string crashes program due to invalid string input
+  try {
+    if (count_subscribers(*topic) > 0) return true;
+  } catch (const std::runtime_error &e) {
+    RCLCPP_WARN_STREAM(get_logger(), "Exception when counting subscribers for topic " <<
+                        *topic << ": " << e.what());
+    rcutils_reset_error();
+  }
+ }
+ return false;
+}
+
+void ZedCamera::stopPipeline()
+{
+  if (mThreadStop) return; // If pipeline already stopped do nothing
+  mThreadStop = true;
+  mGrabThread.join();
+  mVdThread.join();
+  mPcThread.join();
+}
+
+void ZedCamera::restartPipeline()
+{
+  if (!mThreadStop) return; // If pipeline running do nothing
+  mThreadStop = false;
+  mGrabThread = std::thread(&ZedCamera::threadFunc_zedGrab, this);
+  mVdThread = std::thread(&ZedCamera::threadFunc_videoDepthElab, this);
+  mPcThread = std::thread(&ZedCamera::threadFunc_pointcloudElab, this);
 }
 
 void ZedCamera::callback_pubHeartbeat()

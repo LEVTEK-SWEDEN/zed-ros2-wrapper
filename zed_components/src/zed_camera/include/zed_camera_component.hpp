@@ -140,6 +140,7 @@ protected:
   void callback_pubPaths();
   void callback_pubTemp();
   void callback_pubHeartbeat();
+  void callback_checkIfCamShouldIdle();
   void callback_gnssPubTimerTimeout();
   rcl_interfaces::msg::SetParametersResult callback_dynamicParamChange(
     std::vector<rclcpp::Parameter> parameters);
@@ -351,6 +352,10 @@ protected:
   bool updatePosTrackingSubscribers(bool force = false);
   bool isPosTrackingRequired();
 
+  bool isPipelineSubscribed();
+  void stopPipeline();
+  void restartPipeline();
+
   void applyVideoSettings();
   void applyAutoExposureGainSettings();
   void applyExposureGainSettings();
@@ -391,6 +396,7 @@ protected:
   void startPathPubTimer(double pathTimerRate);
   void startTempPubTimer();
   void startHeartbeatTimer();
+  void startCamIdleTimer();
 
   // Region of Interest
   std::string getParam(
@@ -462,6 +468,46 @@ private:
   std::string mPosePathTopic;
   std::string mClickedPtTopic;  // Clicked point
   std::string mRoiMaskTopic;
+
+  // List of topics to which the image camera pipeline publishes
+  std::vector<const std::string*> mPipelineTopics = {
+    &mLeftTopic,
+    &mLeftRawTopic,
+    &mRightTopic,
+    &mRightRawTopic,
+    &mRgbTopic,
+    &mRgbRawTopic,
+    &mStereoTopic,
+    &mStereoRawTopic,
+    &mLeftGrayTopic,
+    &mLeftRawGrayTopic,
+    &mRightGrayTopic,
+    &mRightRawGrayTopic,
+    &mRgbGrayTopic,
+    &mRgbRawGrayTopic,
+    &mDisparityTopic,
+    &mDepthTopic,
+    &mDepthInfoTopic,
+    &mConfMapTopic,
+    &mPointcloudTopic,
+    &mOdomTopic,
+    &mPoseTopic,
+    &mPoseStatusTopic,
+    &mPoseCovTopic,
+    &mGnssPoseTopic,
+    &mGnssPoseStatusTopic,
+    &mGeoPoseTopic,
+    &mGeoPoseStatusTopic,
+    &mFusedFixTopic,
+    &mOriginFixTopic,
+    &mPointcloudFusedTopic,
+    &mPointcloud3DLandmarksTopic,
+    &mObjectDetTopic,
+    &mBodyTrkTopic,
+    &mOdomPathTopic,
+    &mPosePathTopic,
+    &mRoiMaskTopic
+  };
   // <---- Topics
 
   // ----> Parameter variables
@@ -1050,6 +1096,7 @@ private:
     mTempPubTimer;    // Timer to retrieve and publish CMOS temperatures
   rclcpp::TimerBase::SharedPtr mGnssPubCheckTimer;
   rclcpp::TimerBase::SharedPtr mHeartbeatTimer;
+  rclcpp::TimerBase::SharedPtr mCamIdleTimer;
   double mSensRateComp = 1.0;
   // <---- Threads and Timers
 

@@ -88,6 +88,7 @@ protected:
 
   void startTempPubTimer();
   void startHeartbeatTimer();
+  void startCamIdleTimer();
   bool startStreamingServer();
   void stopStreamingServer();
   bool startSvoRecording(std::string & errMsg);
@@ -95,6 +96,9 @@ protected:
   // <---- Initialization functions
 
   // ----> Utility functions
+  void stopPipeline();
+  void restartPipeline();
+
   void fillCamInfo(
     sensor_msgs::msg::CameraInfo::SharedPtr camInfoMsg,
     const std::string & frameId, bool rawParam = false);
@@ -218,6 +222,7 @@ protected:
     diagnostic_updater::DiagnosticStatusWrapper & stat);
   void callback_pubTemp();
   void callback_pubHeartbeat();
+  void callback_checkIfCamShouldIdle();
 
   void callback_enableStreaming(
     const std::shared_ptr<rmw_request_id_t> request_header,
@@ -262,6 +267,7 @@ private:
   rclcpp::TimerBase::SharedPtr _initTimer;
   rclcpp::TimerBase::SharedPtr _tempPubTimer;    // Timer to retrieve and publish camera temperature
   rclcpp::TimerBase::SharedPtr _heartbeatTimer;
+  rclcpp::TimerBase::SharedPtr _camIdleTimer;
   // <---- Threads and Timers
 
   // ----> Thread Sync
