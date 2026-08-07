@@ -2479,6 +2479,8 @@ void ZedCamera::publishImageWithInfo(
     DEBUG_NITROS("Sent CUDA Image buffer with memory at: %p", dbuffer);
 
     // Copy data bytes to CUDA buffer
+    // EMILIS: temporary test of time it takes to do a cuda memcpy of our image
+    sl_tools::StopWatch cudaTimer(get_clock());
     CUDA_CHECK(
       cudaMemcpy2D(
         dbuffer,
@@ -2487,6 +2489,7 @@ void ZedCamera::publishImageWithInfo(
         spitch,
         img.getWidth() * img.getPixelBytes(), img.getHeight(),
         cudaMemcpyDeviceToDevice));
+    RCLCPP_INFO_STREAM(get_logger(), "CUDA Memcpy time in microseconds: " << 1e6 * cudaTimer.toc());
 
     // Adding header data
     std_msgs::msg::Header header;
