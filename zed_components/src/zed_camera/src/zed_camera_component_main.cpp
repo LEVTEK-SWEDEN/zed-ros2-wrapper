@@ -3866,10 +3866,7 @@ void ZedCamera::initThreads()
 
   mVdThread = std::thread(&ZedCamera::threadFunc_videoDepthElab, this);
 
-  if (!isDepthDisabled()) {
-    mPcDataReady = false;
-    mPcThread = std::thread(&ZedCamera::threadFunc_pointcloudElab, this);
-  }
+  mPcThread = std::thread(&ZedCamera::threadFunc_pointcloudElab, this);
 
   mGrabThread = std::thread(&ZedCamera::threadFunc_zedGrab, this);
 }
@@ -4853,7 +4850,7 @@ void ZedCamera::threadFunc_zedGrab()
 
   // Set the name of the zedGrab thread for easier identification in
   // system monitors
-  pthread_setname_np(pthread_self(), (get_name() + std::string("_zedGrab")).c_str());
+  pthread_setname_np(pthread_self(), "stereo-grab-thd");
 
   // ----> Advanced thread settings
   if (mChangeThreadSched) {
@@ -8771,31 +8768,27 @@ void ZedCamera::callback_updateDiagnostic(
       && mDepthMode != sl::DEPTH_MODE::NONE
       && mDepthRate >= 0.0;
 
-    if (mVdPublishing) {
-      if (mSvoMode && !mSvoRealtime) {
-        freq = 1. / mGrabPeriodMean_sec->getAvg();
-        freq_perc = 100. * freq / mVdPubRate;
-        stat.addf(
-          "Depth", "Mean Frequency: %.1f Hz (%.1f%%)", freq,
-          freq_perc);
-      } else if (should_publish_depth_diagnostics) {
-        freq = 1. / mDepthPublishPeriodMean_sec->getAvg();
-        freq_perc = 100. * freq / mDepthRate;
-        frame_grab_period = 1. / mDepthRate;
-        stat.addf(
-          "Depth publish rate", "%.1f Hz (%.1f%%)", freq,
-          freq_perc);
-      }
+    if (mSvoMode && !mSvoRealtime) {
+      freq = 1. / mGrabPeriodMean_sec->getAvg();
+      freq_perc = 100. * freq / mVdPubRate;
       stat.addf(
-        "Publish time (average)", "%.6f sec (Max. %.3f sec)",
-        mVideoDepthElabMean_sec->getAvg(), 1.0 / mVdPubRate);
-
-      freq = 1.0 / mPublishPeriodMean_sec->getAvg();
-      freq_perc = 100.0 * freq / mVdPubRate;
-      stat.addf("Publishing rate", "%.1f Hz (%.1f%%)", freq, freq_perc);
-    } else {
-      stat.add("Depth", "Topic not subscribed");
+        "Depth", "Mean Frequency: %.1f Hz (%.1f%%)", freq,
+        freq_perc);
+    } else if (should_publish_depth_diagnostics) {
+      freq = 1. / mDepthPublishPeriodMean_sec->getAvg();
+      freq_perc = 100. * freq / mDepthRate;
+      frame_grab_period = 1. / mDepthRate;
+      stat.addf(
+        "Depth publish rate", "%.1f Hz (%.1f%%)", freq,
+        freq_perc);
     }
+    stat.addf(
+      "Publish time (average)", "%.6f sec (Max. %.3f sec)",
+      mVideoDepthElabMean_sec->getAvg(), 1.0 / mVdPubRate);
+
+    freq = 1.0 / mPublishPeriodMean_sec->getAvg();
+    freq_perc = 100.0 * freq / mVdPubRate;
+    stat.addf("Publishing rate", "%.1f Hz (%.1f%%)", freq, freq_perc);
 
     if (mSvoMode) {
       double svo_perc = 100. * (static_cast<double>(mSvoFrameId) / mSvoFrameCount);

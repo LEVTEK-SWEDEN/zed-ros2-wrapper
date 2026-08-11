@@ -310,9 +310,7 @@ protected:
   void publishConfidenceMap(const rclcpp::Time & t);
   void publishDisparityImage(const rclcpp::Time & t);
   void publishDepthInfo(const rclcpp::Time & t);
-  void publishCameraInfos(); // Used to publish camera infos when no video/depth is subscribed
 
-  void checkRgbDepthSync();
   bool checkGrabAndUpdateTimestamp(rclcpp::Time & out_pub_ts);
 
   void processPointCloud();
@@ -1090,8 +1088,6 @@ private:
   bool mPosTrackingStarted = false;
   std::atomic_bool mPoseLocked = false;
   std::atomic<uint64_t> mPoseLockCount{0};
-  bool mVdPublishing = true;  // Indicates if video and depth data are
-                               // subscribed and then published
   bool mPcPublishing =
     false;    // Indicates if point cloud data are subscribed and then published
   bool mTriggerAutoExpGain = true;  // Triggered on start

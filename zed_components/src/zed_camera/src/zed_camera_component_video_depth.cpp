@@ -1132,14 +1132,13 @@ bool ZedCamera::shouldProcessPointCloudThisFrame()
 bool ZedCamera::isDepthRequired()
 {
   // DEBUG_STREAM_COMM( "isDepthRequired called");
+  if (!updateVideoDepthSubscribers()) {
+    DEBUG_STREAM_VD(" * [isDepthRequired] failed to refresh subscribers, using cached values");
+  }
 
   if (!shouldGrabDepthThisFrame()) {
     DEBUG_STREAM_COMM("Depth not required this frame");
     return false;
-  }
-
-  if (!updateVideoDepthSubscribers()) {
-    DEBUG_STREAM_VD(" * [isDepthRequired] failed to refresh subscribers, using cached values");
   }
 
   size_t tot_sub =
@@ -1742,7 +1741,7 @@ void ZedCamera::retrieveVideoDepth(bool gpu)
 
   if (retrieved_depth) {
     DEBUG_STREAM_VD(" *** Depth Data retrieved ***");
-    mSdkDepthGrabTS[mVdBufIdx] = mZed->getTimestamp(sl::TIME_REFERENCE::IMAGE);
+    mSdkDepthGrabTS[mGrabBufIdx] = mZed->getTimestamp(sl::TIME_REFERENCE::IMAGE);
     auto now = mZed->getTimestamp(sl::TIME_REFERENCE::CURRENT);
     DEBUG_STREAM_VD(
       " * Depth Latency: " << static_cast<double>(now - mSdkDepthGrabTS[mGrabBufIdx]) * 1e-9 << " sec");
@@ -1968,27 +1967,29 @@ void ZedCamera::publishVideoDepth(rclcpp::Time & out_pub_ts)
 {
   DEBUG_VD("=== Publish Video and Depth topics === ");
 
-  if (!(mSdkLastPublishTS < mSdkGrabTS[mVdBufIdx])) return;
-  mSdkLastPublishTS = mSdkGrabTS[mVdBufIdx];
-
   sl_tools::StopWatch vdElabTimer(get_clock());
 
-  rclcpp::Time timeStamp = sl_tools::slTime2Ros(mSdkGrabTS[mVdBufIdx]);
 
-  publishLeftAndRgbImages(timeStamp);
-  publishLeftRawAndRgbRawImages(timeStamp);
-  publishLeftGrayAndRgbGrayImages(timeStamp);
-  publishLeftRawGrayAndRgbRawGrayImages(timeStamp);
-  publishRightImages(timeStamp);
-  publishRightRawImages(timeStamp);
-  publishRightGrayImages(timeStamp);
-  publishRightRawGrayImages(timeStamp);
-  publishStereoImages(timeStamp);
-  publishStereoRawImages(timeStamp);
+  if (mSdkLastPublishTS < mSdkGrabTS[mVdBufIdx]) {
+    mSdkLastPublishTS = mSdkGrabTS[mVdBufIdx];
+    rclcpp::Time timeStamp = sl_tools::slTime2Ros(mSdkGrabTS[mVdBufIdx]);
 
+    publishLeftAndRgbImages(timeStamp);
+    publishLeftRawAndRgbRawImages(timeStamp);
+    publishLeftGrayAndRgbGrayImages(timeStamp);
+    publishLeftRawGrayAndRgbRawGrayImages(timeStamp);
+    publishRightImages(timeStamp);
+    publishRightRawImages(timeStamp);
+    publishRightGrayImages(timeStamp);
+    publishRightRawGrayImages(timeStamp);
+    publishStereoImages(timeStamp);
+    publishStereoRawImages(timeStamp);
+  }
 
   if (mSdkLastDepthPublishTS < mSdkDepthGrabTS[mVdBufIdx]) {
     mSdkLastDepthPublishTS = mSdkDepthGrabTS[mVdBufIdx];
+    rclcpp::Time timeStamp = sl_tools::slTime2Ros(mSdkDepthGrabTS[mVdBufIdx]);
+
     publishDepthImage(timeStamp);
     publishConfidenceMap(timeStamp);
     publishDisparityImage(timeStamp);
@@ -2829,7 +2830,7 @@ void ZedCamera::threadFunc_videoDepthElab()
 
   // Set the name of the videoDepthElab thread for easier identification in
   // system monitors
-  pthread_setname_np(pthread_self(), (get_name() + std::string("_videoDepthElab")).c_str());
+  pthread_setname_np(pthread_self(), "stereo-pub-thd");
 
   setupVideoDepthThread();
 
@@ -2928,47 +2929,13 @@ void ZedCamera::handleVideoDepthPublishing()
 
   // ----> Publish sync sensors data if needed
   if (mSensCameraSync) {
-    if (!sl_tools::isZED(mCamRealModel) && mVdPublishing &&
+    if (!sl_tools::isZED(mCamRealModel) &&
       pub_ts != TIMEZERO_ROS)
     {
       publishSensorsData(pub_ts);
     }
   }
   // <---- Publish sync sensors data if needed
-}
-
-void ZedCamera::publishCameraInfos()
-{
-  rclcpp::Time pub_ts = get_clock()->now();
-
-  publishCameraInfo(mPubRgbCamInfo, mLeftCamInfoMsg, pub_ts);
-  publishCameraInfo(mPubRawRgbCamInfo, mLeftCamInfoRawMsg, pub_ts);
-  publishCameraInfo(mPubLeftCamInfo, mLeftCamInfoMsg, pub_ts);
-  publishCameraInfo(mPubRawLeftCamInfo, mLeftCamInfoRawMsg, pub_ts);
-  publishCameraInfo(mPubRightCamInfo, mRightCamInfoMsg, pub_ts);
-  publishCameraInfo(mPubRawRightCamInfo, mRightCamInfoRawMsg, pub_ts);
-  publishCameraInfo(mPubRgbGrayCamInfo, mLeftCamInfoMsg, pub_ts);
-  publishCameraInfo(mPubRawRgbGrayCamInfo, mLeftCamInfoRawMsg, pub_ts);
-  publishCameraInfo(mPubLeftGrayCamInfo, mLeftCamInfoMsg, pub_ts);
-  publishCameraInfo(mPubRawLeftGrayCamInfo, mLeftCamInfoRawMsg, pub_ts);
-  publishCameraInfo(mPubRightGrayCamInfo, mRightCamInfoMsg, pub_ts);
-  publishCameraInfo(mPubRawRightGrayCamInfo, mRightCamInfoRawMsg, pub_ts);
-  publishCameraInfo(mPubDepthCamInfo, mLeftCamInfoMsg, pub_ts);
-  publishCameraInfo(mPubConfMapCamInfo, mLeftCamInfoMsg, pub_ts);
-  publishCameraInfo(mPubRgbCamInfoTrans, mLeftCamInfoMsg, pub_ts);
-  publishCameraInfo(mPubRawRgbCamInfoTrans, mLeftCamInfoRawMsg, pub_ts);
-  publishCameraInfo(mPubLeftCamInfoTrans, mLeftCamInfoMsg, pub_ts);
-  publishCameraInfo(mPubRawLeftCamInfoTrans, mLeftCamInfoRawMsg, pub_ts);
-  publishCameraInfo(mPubRightCamInfoTrans, mRightCamInfoMsg, pub_ts);
-  publishCameraInfo(mPubRawRightCamInfoTrans, mRightCamInfoRawMsg, pub_ts);
-  publishCameraInfo(mPubRgbGrayCamInfoTrans, mLeftCamInfoMsg, pub_ts);
-  publishCameraInfo(mPubRawRgbGrayCamInfoTrans, mLeftCamInfoRawMsg, pub_ts);
-  publishCameraInfo(mPubLeftGrayCamInfoTrans, mLeftCamInfoMsg, pub_ts);
-  publishCameraInfo(mPubRawLeftGrayCamInfoTrans, mLeftCamInfoRawMsg, pub_ts);
-  publishCameraInfo(mPubRightGrayCamInfoTrans, mRightCamInfoMsg, pub_ts);
-  publishCameraInfo(mPubRawRightGrayCamInfoTrans, mRightCamInfoRawMsg, pub_ts);
-  publishCameraInfo(mPubDepthCamInfoTrans, mLeftCamInfoMsg, pub_ts);
-  publishCameraInfo(mPubConfMapCamInfoTrans, mLeftCamInfoMsg, pub_ts);
 }
 
 void ZedCamera::setupPointCloudThread()
@@ -3086,7 +3053,7 @@ void ZedCamera::threadFunc_pointcloudElab()
 
   // Set the name of the pointcloudElab thread for easier identification in
   // system monitors
-  pthread_setname_np(pthread_self(), (get_name() + std::string("_pointcloudElab")).c_str());
+  pthread_setname_np(pthread_self(), "stereo-pc-thd");
 
   setupPointCloudThread();
 
