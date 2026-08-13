@@ -2830,25 +2830,19 @@ void ZedCamera::threadFunc_videoDepthElab()
 
   // Set the name of the videoDepthElab thread for easier identification in
   // system monitors
-  pthread_setname_np(pthread_self(), "stereo-pub-thd");
+  pthread_setname_np(pthread_self(), (get_name() + std::string("_videoDepthElab")).c_str());
 
   setupVideoDepthThread();
 
   while (!mThreadStop) {
-    // Wait for mGrabVdSignal to continue
-    std::unique_lock<std::mutex> pipeline_lock(mPipelineMutex);
-    mCvGrab.wait(pipeline_lock, [this]{ return mGrabVdSignal; });
-    mGrabVdSignal = false;
-    pipeline_lock.unlock();
+    // Wait for grab thread signal to continue
+    lockAndWait(mCvGrab, &mGrabVdSignal);
 
     mVdBufIdx ^= 1;
     handleVideoDepthPublishing();
 
-    // Notify with mPublishVdSignal
-    pipeline_lock.lock();
-    mPublishVdSignal = true;
-    mCvPub.notify_one();
-    pipeline_lock.unlock();
+    // Notify publishing is finished to grab thread
+    lockAndNotify(mCvPub, &mPublishVdSignal);
   }
 
   DEBUG_STREAM_VD("Video/Depth thread finished");
@@ -3053,25 +3047,19 @@ void ZedCamera::threadFunc_pointcloudElab()
 
   // Set the name of the pointcloudElab thread for easier identification in
   // system monitors
-  pthread_setname_np(pthread_self(), "stereo-pc-thd");
+  pthread_setname_np(pthread_self(), (get_name() + std::string("_pointcloudElab")).c_str());
 
   setupPointCloudThread();
 
   while (!mThreadStop) {
-    // Wait for mGrabPcSignal to continue
-    std::unique_lock<std::mutex> pipeline_lock(mPipelineMutex);
-    mCvGrab.wait(pipeline_lock, [this]{ return mGrabPcSignal; });
-    mGrabPcSignal = false;
-    pipeline_lock.unlock();
+    // Wait for grab thread signal to continue
+    lockAndWait(mCvGrab, &mGrabPcSignal);
 
     mPcBufIdx ^= 1;
     handlePointCloudPublishing();
 
-    // Notify with mPublishPcSignal
-    pipeline_lock.lock();
-    mPublishPcSignal = true;
-    mCvPub.notify_one();
-    pipeline_lock.unlock();
+    // Notify publishing is finished to grab thread
+    lockAndNotify(mCvPub, &mPublishPcSignal);
   }
 
   DEBUG_STREAM_PC("Pointcloud thread finished");

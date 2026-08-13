@@ -349,6 +349,11 @@ protected:
   bool updatePosTrackingSubscribers(bool force = false);
   bool isPosTrackingRequired();
 
+  void lockAndWait(std::condition_variable &cv, bool *signal);
+  void lockAndWait(std::condition_variable &cv, const std::vector<bool*> &signals);
+  void lockAndNotify(std::condition_variable &cv, bool *signal);
+  void lockAndNotify(std::condition_variable &cv, const std::vector<bool*> &signals);
+
   void applyVideoSettings();
   void applyAutoExposureGainSettings();
   void applyExposureGainSettings();

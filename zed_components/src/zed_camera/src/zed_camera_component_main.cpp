@@ -4850,7 +4850,7 @@ void ZedCamera::threadFunc_zedGrab()
 
   // Set the name of the zedGrab thread for easier identification in
   // system monitors
-  pthread_setname_np(pthread_self(), "stereo-grab-thd");
+  pthread_setname_np(pthread_self(), (get_name() + std::string("_zedGrab")).c_str());
 
   // ----> Advanced thread settings
   if (mChangeThreadSched) {
@@ -4957,7 +4957,8 @@ void ZedCamera::threadFunc_zedGrab()
         // If publishing rate is set to be less than camera fps, then we should not grab a frame
         // all the time. The sleep is to avoid the first part of the while loop from running over
         // and over while we wait for the publish rate timer to say we should grab the frame.
-        double sleep_time = 1e6 / (4.0 * mVdPubRate);
+        const double wait_factor = 4.0; // 1 / wait_factor is what frac of frame we wait
+        double sleep_time = 1e6 / (wait_factor * mVdPubRate);
         int sleep_time_usec = static_cast<int>(sleep_time);
         rclcpp::sleep_for(std::chrono::microseconds(sleep_time_usec));
         continue;
@@ -5444,16 +5445,11 @@ void ZedCamera::threadFunc_zedGrab()
     }
 
     // Thread sync
-    // Wait for mPublishVdSignal to continue
-    std::unique_lock<std::mutex> pipeline_lock(mPipelineMutex);
-    mCvPub.wait(pipeline_lock, [this]{ return mPublishVdSignal && mPublishPcSignal; });
-    mPublishVdSignal = false;
-    mPublishPcSignal = false;
-    // Notify the video/depth and point cloud publishing threads
-    mGrabVdSignal = true;
-    mGrabPcSignal = true;
-    mCvGrab.notify_all();
-    pipeline_lock.unlock();
+    // Wait for publishing thread signals to continue
+    lockAndWait(mCvPub, std::vector<bool*>{&mPublishVdSignal, &mPublishPcSignal});
+    // Signal the publishing threads that the next frame is ready
+    lockAndNotify(mCvGrab, std::vector<bool*>{&mGrabVdSignal, &mGrabPcSignal});
+
     DEBUG_STREAM_GRAB("Grab thread: iteration completed");
   }
 
@@ -5461,6 +5457,41 @@ void ZedCamera::threadFunc_zedGrab()
   mHeartbeatTimer->cancel();
 
   DEBUG_STREAM_COMM("Grab thread finished");
+}
+
+void ZedCamera::lockAndWait(std::condition_variable &cv, bool *signal)
+{
+  lockAndWait(cv, std::vector<bool*>{signal});
+}
+
+void ZedCamera::lockAndWait(std::condition_variable &cv, const std::vector<bool*> &signals) 
+{
+    // Wait for all signals to be true to continue
+    std::unique_lock<std::mutex> pipeline_lock(mPipelineMutex);
+    mCvGrab.wait(pipeline_lock, [this, signals]{
+      for (bool *signal : signals)
+        if (!(*signal)) return false;
+      return true; 
+    });
+
+    // Reset all signals back to false
+    for (bool *signal : signals)
+      *signal = false;
+}
+
+void ZedCamera::lockAndNotify(std::condition_variable &cv, bool *signal)
+{
+  lockAndNotify(cv, std::vector<bool*>{signal});
+}
+
+void ZedCamera::lockAndNotify(std::condition_variable &cv, const std::vector<bool*> &signals)
+{
+  std::unique_lock<std::mutex> pipeline_lock(mPipelineMutex);
+  // Set all signal variables to true
+  for (bool *signal : signals)
+    *signal = true;
+  
+  cv.notify_all();
 }
 
 bool ZedCamera::publishSensorsData(rclcpp::Time force_ts)
