@@ -35,6 +35,7 @@ ZedCameraOne::ZedCameraOne(const rclcpp::NodeOptions & options)
   _imuFreqTimer(get_clock()),
   _imuTfFreqTimer(get_clock()),
   _imgPubFreqTimer(get_clock()),
+  _shouldGrabTimer(get_clock()),
   _frameTimestamp(TIMEZERO_ROS),
   _lastTs_imu(TIMEZERO_ROS),
   _colorSubCount(0),
@@ -450,6 +451,8 @@ void ZedCameraOne::getCameraInfoParams()
       shared_from_this(), "general.grab_frame_rate", _camGrabFrameRate, _camGrabFrameRate,
       " * Camera framerate: ", false, 15,
       120);
+    sl_tools::getParam(shared_from_this(), "general.pub_frame_rate", _vdPubRate, _vdPubRate,
+                        " * Camera pub rate: ", true, 0.0, static_cast<double>(_camGrabFrameRate));
   }
   sl_tools::getParam(
     shared_from_this(), "general.gpu_id", _gpuId, _gpuId, " * GPU ID: ", false, -1, 256);
@@ -1359,8 +1362,8 @@ void ZedCameraOne::updateImageDiagnostics(diagnostic_updater::DiagnosticStatusWr
 {
   if (_videoPublishing) {
     double freq = 1. / _imagePeriodMean_sec->getAvg();
-    double freq_perc = 100. * freq / _camGrabFrameRate;
-    double frame_grab_period = 1. / _camGrabFrameRate;
+    double freq_perc = 100. * freq / _vdPubRate;
+    double frame_grab_period = 1. / _vdPubRate;
     stat.addf("Image", "Mean Frequency: %.1f Hz (%.1f%%)", freq, freq_perc);
     stat.addf(
       "Image", "Processing Time: %.6f sec (Max. %.3f sec)",
@@ -1496,6 +1499,13 @@ ZedCameraOne::callback_dynamicParamChange(
       } else {
         DEBUG_STREAM_COMM(" * " << param_name << " not changed: " << value);
       }
+      continue;
+    }
+
+    if (param_name == "general.pub_frame_rate") {
+      double value = param.as_double();
+      if (0.0 <= value && value <= _camGrabFrameRate)
+        _vdPubRate = value;
       continue;
     }
 
@@ -1954,6 +1964,16 @@ void ZedCameraOne::threadFunc_zedGrab()
 
       if (checkGrabThreadInterruption()) {break;}
 
+      if (!shouldGrabThisFrame()) {
+      // If publishing rate is set to be less than camera fps, then we should not grab a frame
+      // all the time. The sleep is to avoid the first part of the while loop from running over
+      // and over while we wait for the publish rate timer to say we should grab the frame.
+      double sleep_time = 1e6 / (4.0 * _vdPubRate);
+      int sleep_time_usec = static_cast<int>(sleep_time);
+      rclcpp::sleep_for(std::chrono::microseconds(sleep_time_usec));
+      continue;
+      }
+
       if (_svoMode && _svoPause) {
         if (!_grabOnce) {
           rclcpp::sleep_for(100ms);
@@ -2083,6 +2103,23 @@ bool ZedCameraOne::checkGrabThreadInterruption()
   }
   if (_threadStop) {
     DEBUG_STREAM_COMM("Grab thread stopped");
+    return true;
+  }
+  return false;
+}
+
+bool ZedCameraOne::shouldGrabThisFrame()
+{
+  // Units are seconds for all variables
+  if (_vdPubRate == _camGrabFrameRate) return true;
+  if (_vdPubRate <= 0.0) return false;
+
+  double target_period(1.0 / _vdPubRate);
+
+  double toc = _shouldGrabTimer.toc();
+  if (toc + _shouldGrabTimerCarry >= target_period) {
+    _shouldGrabTimerCarry = std::min(toc + _shouldGrabTimerCarry - target_period, target_period);
+    _shouldGrabTimer.tic();
     return true;
   }
   return false;
