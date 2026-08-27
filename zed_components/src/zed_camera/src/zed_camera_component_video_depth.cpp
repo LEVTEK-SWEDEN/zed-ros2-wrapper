@@ -1605,6 +1605,8 @@ void ZedCamera::retrieveVideoDepth(bool gpu)
   DEBUG_VD(" *** Retrieving Video/Depth Data DONE ***");
 }
 
+// Helper functions for retrieveVideoDepth()
+
 bool ZedCamera::retrieveLeftImage(bool gpu)
 {
   if (mRgbSubCount + mLeftSubCount + mStereoSubCount > 0) {
@@ -1909,7 +1911,6 @@ bool ZedCamera::checkGrabAndUpdateTimestamp(rclcpp::Time & out_pub_ts)
           << 1. / mVideoDepthPeriodMean_sec->getAvg() << " Hz / Expected: " << 1. / mVdPubRate <<
           " sec @" << mVdPubRate <<
           " Hz");
-
       mLastTs_grab = mSdkGrabTS;
     }
   }

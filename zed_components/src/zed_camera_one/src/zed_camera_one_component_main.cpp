@@ -870,6 +870,7 @@ bool ZedCameraOne::startCamera()
   setupTf2();
   configureZedInput();
   setZedInitParams();
+
   if (!openZedCamera()) {
     return false;
   }
