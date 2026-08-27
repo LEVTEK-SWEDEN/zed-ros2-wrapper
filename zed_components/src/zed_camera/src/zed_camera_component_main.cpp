@@ -626,7 +626,7 @@ void ZedCamera::initParameters()
     mPublishPath = false;
   }
 
-  if (!mDepthDisabled) {
+  if (!isDepthDisabled()) {
     // Region of Interest parameters
     getRoiParams();
   } else {
@@ -3900,7 +3900,7 @@ void ZedCamera::initThreads()
   // <---- Start Video/Depth thread
 
   // ----> Start Pointcloud thread
-  if (!mDepthDisabled) {
+  if (!isDepthDisabled()) {
     mPcDataReady = false;
     mPcThread = std::thread(&ZedCamera::threadFunc_pointcloudElab, this);
   }
