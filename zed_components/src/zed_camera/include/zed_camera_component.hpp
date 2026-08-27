@@ -592,7 +592,6 @@ private:
   std::atomic<bool> mDepthDisabledByRate = false; // frequently updated depending on mDepthRate
   double mDepthTimerCarry = 0.0;
   std::atomic<bool> mDepthDisabledByService = false; // toggled by enable_depth service
-  std::mutex mDepthTimerMutex;
   int mDepthStabilization = 0;
   double mDepthRate = 15.0; 
 

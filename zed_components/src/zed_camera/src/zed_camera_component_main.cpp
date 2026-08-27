@@ -5059,7 +5059,7 @@ void ZedCamera::threadFunc_zedGrab()
           get_logger(), steady_clock, 5000.0,
           " * Waiting for the first valid GNSS fix...");
       }
-      // <---- Check for Positional Tracking requirement
+      // ----> Check for Positional Tracking requirement
 
       if (!isDepthDisabled()) {
         // ----> Check for Spatial Mapping requirement
@@ -5073,6 +5073,7 @@ void ZedCamera::threadFunc_zedGrab()
             stop3dMapping();
           }
         }
+
         // <---- Check for Spatial Mapping requirement
 
         // ----> Check for Object Detection requirement
