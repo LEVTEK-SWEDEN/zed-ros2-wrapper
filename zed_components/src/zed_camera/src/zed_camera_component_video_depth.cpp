@@ -272,7 +272,7 @@ void ZedCamera::initVideoDepthPublishers()
       }
     }
 
-    if (!mDepthDisabled) {
+    if (!isDepthDisabled()) {
       if (mPublishImgRoiMask && (mAutoRoiEnabled || mManualRoiEnabled)) {
         create_dual_pub(mRoiMaskTopic, mPubIpcRoiMask, mPubRoiMask);
       }
@@ -431,7 +431,7 @@ void ZedCamera::initVideoDepthPublishers()
   // <---- Camera Info publishers
 
   // ----> Other depth-related publishers
-  if (!mDepthDisabled) {
+  if (!isDepthDisabled()) {
     if (mPublishDepthInfo) {
       mPubDepthInfo = create_publisher<zed_msgs::msg::DepthInfoStamped>(
         mDepthInfoTopic, mQos, mPubOpt);
@@ -629,14 +629,12 @@ void ZedCamera::getDepthParams()
   }
 
   if (mDepthMode == sl::DEPTH_MODE::NONE) {
-    mDepthDisabled = true;
     mDepthStabilization = 0;
     RCLCPP_INFO_STREAM(
       get_logger(),
       " * Depth mode: " << sl::toString(mDepthMode).c_str()
                         << " - DEPTH DISABLED");
   } else {
-    mDepthDisabled = false;
     RCLCPP_INFO_STREAM(
       get_logger(),
       " * Depth mode: " << sl::toString(mDepthMode).c_str()
@@ -644,7 +642,7 @@ void ZedCamera::getDepthParams()
                         << "]");
   }
 
-  if (!mDepthDisabled) {
+  if (!isDepthDisabled()) {
 #if ((ZED_SDK_MAJOR_VERSION * 10 + ZED_SDK_MINOR_VERSION) < 51)
     const double default_min_depth = 0.1;
 #else
@@ -663,6 +661,14 @@ void ZedCamera::getDepthParams()
       mDepthStabilization, mDepthStabilization,
       " * Depth Stabilization: ", false, -1, 100);
     // -1 means use SDK default (mInitParams keeps its constructed default value)
+
+    sl_tools::getParam(
+      shared_from_this(), "depth.depth_freq",
+      mDepthRate, mDepthRate,
+      " * Depth Rate: ", true, -1.0, static_cast<double>(mCamGrabFrameRate));
+    if (mDepthRate < 0.0) {
+      mDepthRate = static_cast<double>(mCamGrabFrameRate);
+    }
 
     if (_nitrosDisabled) {
       sl_tools::getParam(
@@ -949,12 +955,6 @@ bool ZedCamera::updateVideoDepthSubscribers(bool force)
   constexpr auto kSubQueryInterval = std::chrono::milliseconds(200);
   auto now = std::chrono::steady_clock::now();
 
-  if (!force && mVideoDepthSubCountInit &&
-    (now - mLastVideoDepthSubCountQuery) < kSubQueryInterval)
-  {
-    return true;
-  }
-
   mLastVideoDepthSubCountQuery = now;
   mVideoDepthSubCountInit = true;
 
@@ -1053,7 +1053,7 @@ bool ZedCamera::updateVideoDepthSubscribers(bool force)
 #endif
     }
 
-    if (!mDepthDisabled) {
+    if (!isDepthDisabled()) {
       if (_nitrosDisabled) {
         if (mPublishDepthMap) {
           mDepthSubCount = mPubDepth.getNumSubscribers() + ipc_sub_count(mPubIpcDepth);
@@ -1101,12 +1101,30 @@ bool ZedCamera::updateVideoDepthSubscribers(bool force)
   return true;
 }
 
+void ZedCamera::updateDepthRateDisabling()
+{
+  // Units are seconds for all variables
+  if (mDepthRate == mCamGrabFrameRate) { mDepthDisabledByRate = false; return; }
+  if (mDepthRate <= 0.0) { mDepthDisabledByRate = true; return; }
+  
+  double targetPeriod(1.0 / mDepthRate);
+
+  double toc = mDepthRateTimer.toc();
+  if (toc + mDepthTimerCarry >= targetPeriod) {
+    mDepthTimerCarry = std::min(toc + mDepthTimerCarry - targetPeriod, targetPeriod);
+    mDepthRateTimer.tic();
+    mDepthDisabledByRate = false;
+    return;
+  }
+  mDepthDisabledByRate = true;
+}
+
 bool ZedCamera::isDepthRequired()
 {
   // DEBUG_STREAM_COMM( "isDepthRequired called");
 
-  if (mDepthDisabled) {
-    DEBUG_STREAM_COMM("Depth not required: depth disabled");
+  if (!shouldRunDepthPipeline()) {
+    DEBUG_STREAM_COMM("Depth not required this frame");
     return false;
   }
 
@@ -1561,8 +1579,15 @@ void ZedCamera::retrieveVideoDepth(bool gpu)
 
   if (retrieved_video) {
     DEBUG_STREAM_VD(" *** Video Data retrieved ***");
+    mSdkGrabTS = mZed->getTimestamp(sl::TIME_REFERENCE::IMAGE);
+    auto now = mZed->getTimestamp(sl::TIME_REFERENCE::CURRENT);
+    DEBUG_STREAM_VD(
+      " * Video Latency: " << static_cast<double>(now - mSdkGrabTS) * 1e-9 << " sec");
   }
 
+  // Don't retrieve depth if we don't need it this frame (fine to check here, we are
+  // still in the grab thread thus we haven't updated mDepthDisabledByRate yet)
+  if (!shouldRunDepthPipeline()) return;
   DEBUG_STREAM_VD(" *** Retrieving Depth Data ***");
   retrieved_depth |= retrieveDepthMap(gpu);
   retrieved_depth |= retrieveConfidence(gpu);
@@ -1571,13 +1596,10 @@ void ZedCamera::retrieveVideoDepth(bool gpu)
 
   if (retrieved_depth) {
     DEBUG_STREAM_VD(" *** Depth Data retrieved ***");
-  }
-
-  if (retrieved_video || retrieved_depth) {
-    mSdkGrabTS = mZed->getTimestamp(sl::TIME_REFERENCE::IMAGE);
+    mSdkDepthGrabTS = mZed->getTimestamp(sl::TIME_REFERENCE::IMAGE);
     auto now = mZed->getTimestamp(sl::TIME_REFERENCE::CURRENT);
     DEBUG_STREAM_VD(
-      " * Video/Depth Latency: " << static_cast<double>(now - mSdkGrabTS) * 1e-9 << " sec");
+      " * Depth Latency: " << static_cast<double>(now - mSdkDepthGrabTS) * 1e-9 << " sec");
   }
 
   DEBUG_VD(" *** Retrieving Video/Depth Data DONE ***");
@@ -1803,7 +1825,6 @@ void ZedCamera::publishVideoDepth(rclcpp::Time & out_pub_ts)
   DEBUG_VD("=== Publish Video and Depth topics === ");
   sl_tools::StopWatch vdElabTimer(get_clock());
 
-  checkRgbDepthSync();
 
   vdElabTimer.tic();
   rclcpp::Time timeStamp;
@@ -1892,6 +1913,16 @@ bool ZedCamera::checkGrabAndUpdateTimestamp(rclcpp::Time & out_pub_ts)
           " Hz");
       mLastTs_grab = mSdkGrabTS;
     }
+  }
+
+  if (mSdkDepthGrabTS.getNanoseconds() != mLastTs_depthGrab.getNanoseconds()
+      && mSdkDepthGrabTS.data_ns != 0 
+      && !mSvoMode) {
+    double period_sec =
+      static_cast<double>(mSdkDepthGrabTS.data_ns - mLastTs_depthGrab.data_ns) / 1e9;
+
+    mDepthPeriodMean_sec->addValue(period_sec);
+    mLastTs_depthGrab = mSdkDepthGrabTS;
   }
 
   if (mSvoMode) {
@@ -2217,12 +2248,9 @@ void ZedCamera::publishStereoRawImages(const rclcpp::Time & t)
 
 void ZedCamera::publishDepthImage(const rclcpp::Time & t)
 {
-  if (mDepthSubCount > 0) {
-    publishDepthMapWithInfo(mMatDepth, t);
-  } else {
-    publishCameraInfo(mPubDepthCamInfo, mLeftCamInfoMsg, t);
-    publishCameraInfo(mPubDepthCamInfoTrans, mLeftCamInfoMsg, t);
-  }
+  if (mSdkDepthGrabTS == mSdkLastDepthPublishTS || mDepthSubCount <= 0) return;
+  mSdkLastDepthPublishTS = mSdkDepthGrabTS;
+  publishDepthMapWithInfo(mMatDepth, t);
 }
 
 void ZedCamera::publishConfidenceMap(const rclcpp::Time & t)
@@ -3048,8 +3076,6 @@ void ZedCamera::handleVideoDepthPublishing()
     wait_usec = static_cast<int>(vd_period_usec - elapsed_usec);
     rclcpp::sleep_for(std::chrono::microseconds(wait_usec));
     DEBUG_STREAM_VD(" * [handleVideoDepthPublishing] wait_usec " << wait_usec);
-  } else {
-    rclcpp::sleep_for(std::chrono::microseconds(wait_usec));
   }
   DEBUG_STREAM_VD(" * [handleVideoDepthPublishing] sleeped for " << wait_usec << " µsec");
 
@@ -3491,6 +3517,32 @@ bool ZedCamera::handleDepthParams(
       val = static_cast<double>(mCamGrabFrameRate);
     }
     mPcPubRate = val;
+    DEBUG_STREAM_DYN_PARAMS("Parameter '" << name << "' correctly set to " << val);
+    return true;
+  } else if (name == "depth.depth_freq") {
+    rclcpp::ParameterType correctType = rclcpp::ParameterType::PARAMETER_DOUBLE;
+    if (param.get_type() != correctType) {
+      result.successful = false;
+      result.reason = name + " must be a " + rclcpp::to_string(correctType);
+      RCLCPP_WARN_STREAM(get_logger(), result.reason);
+      return true;
+    }
+
+    double val = param.as_double();
+    if (val < -1.0 || val > mCamGrabFrameRate) {
+      result.successful = false;
+      result.reason = name + " must be >= -1 and <= `grab_frame_rate` (0 or -1 = no limit)";
+      RCLCPP_WARN_STREAM(get_logger(), result.reason);
+      return true;
+    }
+
+    if (val < 0.0) {
+      val = static_cast<double>(mCamGrabFrameRate);
+    }
+
+    mDepthRate = val;
+    // Also need to update the window for the diagnostics (so diagnostics refresh per second)
+    mDepthPeriodMean_sec->setNewSize(static_cast<size_t>(mDepthRate));
     DEBUG_STREAM_DYN_PARAMS("Parameter '" << name << "' correctly set to " << val);
     return true;
   } else if (name == "depth.depth_confidence" || name == "depth.depth_texture_conf") {
